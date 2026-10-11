@@ -1,0 +1,50 @@
+erDiagram
+  PERSON ||--o{ TICKET : "requests"
+  PERSON ||--o{ TICKET_ASSIGNMENT : "assigned as"
+  VENDOR ||--o{ PERSON : "employs (LARP)"
+  DEPARTMENT ||--o{ ASSET : "owns"
+  DEPARTMENT ||--o{ PERSON : "supervisors belong to"
+  CATEGORY ||--o{ ASSET : "classifies"
+  PERSON }o--o{ CATEGORY : "assignee specializes in (via ASSIGNEE_CATEGORY)"
+  PERSON }o--o{ ASSET : "supervisors define"
+  ASSET ||--o{ TICKET : "subject of"
+  TICKET ||--o{ TICKET_ASSIGNMENT : "has"
+  TICKET ||--o{ TICKET_ATTACHMENT : "has"
+  TICKET ||--o{ TICKET_COMMENT : "has"
+  TICKET ||--o{ TICKET_STATUS_HISTORY : "logs"
+  PERSON {
+    uuid id PK
+    string name
+    string email
+    string phone
+    enum role "requester, assignee, supervisor"
+    uuid vendorID FK "nullable"
+  }
+  TICKET {
+    uuid id PK
+    string title
+    string description
+    string location
+    enum priority
+    enum status
+    timestamptz createdAt
+    timestamptz closedAt
+    uuid requesterID FK
+    uuid assetID FK "nullable (the user doesn't know this)"
+    uuid supervisorID FK "nullable"
+  }
+  TICKET_ASSIGNMENT {
+    uuid id PK
+    uuid ticketID FK
+    uuid assigneeID FK
+    timestamptz assignedAt
+    timestamptz unassignedAt
+  }
+  TICKET_ATTACHMENT {
+    uuid id PK
+    uuid ticketID FK
+    uuid uploadedByID FK
+    enum kind "issue_evidence, completion_proof"
+    string storageUrl
+    timestamptz uploadedAt
+  }
