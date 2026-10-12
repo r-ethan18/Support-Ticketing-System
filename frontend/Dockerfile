@@ -3,8 +3,8 @@ FROM node:22-alpine AS deps
 RUN corepack enable && corepack prepare pnpm@12.11.2 --activate
 
 WORKDIR /app
-COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 FROM deps AS build
 COPY . .
