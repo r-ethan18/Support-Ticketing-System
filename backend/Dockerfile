@@ -3,7 +3,7 @@ FROM python:3.14-rc-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
-COPY pyproject.toml .python-version ./
+COPY pyproject.toml uv.lock* .python-version ./
 RUN uv sync --no-install-project
 COPY src/ ./src/
 RUN uv sync
