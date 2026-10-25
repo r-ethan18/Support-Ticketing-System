@@ -10,6 +10,7 @@ services:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET (>= 32 chars) in .env}
     networks:
       - sts-network
 
