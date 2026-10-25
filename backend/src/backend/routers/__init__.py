@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from backend.auth import get_current_user
 from backend.errors import UNAUTHORIZED
 from backend.routers import (
+    admins,
     assets,
     auth,
     categories,
@@ -17,7 +18,7 @@ protected = APIRouter(
     dependencies=[Depends(get_current_user)],
     responses=UNAUTHORIZED,
 )
-for module in (people, vendors, departments, categories, assets, tickets):
+for module in (admins, people, vendors, departments, categories, assets, tickets):
     protected.include_router(module.router)
 
 api_router = APIRouter(prefix="/api/v1")
