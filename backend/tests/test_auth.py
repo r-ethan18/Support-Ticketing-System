@@ -62,8 +62,30 @@ def test_supervisor_only_route(client: TestClient) -> None:
     as_requester = client.patch(
         TICKET, json=patch, headers=login(client, Role.requester)
     )
+    as_assignee = client.patch(TICKET, json=patch, headers=login(client, Role.assignee))
     as_supervisor = client.patch(
         TICKET, json=patch, headers=login(client, Role.supervisor)
     )
     assert as_requester.status_code == 403
+    assert as_assignee.status_code == 403
     assert as_supervisor.status_code == 501
+
+
+def test_admin_passes_every_role_gate(client: TestClient) -> None:
+    admin = login(client, Role.admin)
+    assert client.patch(TICKET, json={}, headers=admin).status_code == 501
+    assert (
+        client.post(
+            f"{TICKET}/assignments",
+            json={"assigneeId": "00000000-0000-0000-0000-000000000001"},
+            headers=admin,
+        ).status_code
+        == 501
+    )
+    assert (
+        client.delete(
+            f"{TICKET}/assignments/00000000-0000-0000-0000-000000000002",
+            headers=admin,
+        ).status_code
+        == 501
+    )
