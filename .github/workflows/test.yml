@@ -35,7 +35,7 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Run tests
-        run: uv run pytest || echo "No tests configured yet"
+        run: uv run pytest 
 
   frontend-test:
     name: Frontend (Lint & Format)
