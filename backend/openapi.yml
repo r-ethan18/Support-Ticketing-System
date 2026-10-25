@@ -1,0 +1,1958 @@
+openapi: 3.1.0
+info:
+  title: Support Ticketing System API
+  description: REST API for the support ticketing system. Authenticate via `POST /api/v1/auth/token`
+    and send the token as a Bearer header.
+  version: 0.1.0
+paths:
+  /api/v1/auth/token:
+    post:
+      tags:
+      - auth
+      summary: Exchange credentials for an access token
+      description: 'Public endpoint. Send the returned token as `Authorization: Bearer
+        <token>`.'
+      operationId: create_access_token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/me:
+    get:
+      tags:
+      - auth
+      summary: Get the authenticated person
+      operationId: get_me
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Person'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - AccessToken: []
+  /api/v1/people:
+    get:
+      tags:
+      - people
+      summary: List people
+      operationId: list_people
+      security:
+      - AccessToken: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/Role'
+          - type: 'null'
+          title: Role
+      - name: vendorId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Vendorid
+      - name: departmentId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Departmentid
+      - name: categoryId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          description: Only assignees specialising in this category
+          title: Categoryid
+        description: Only assignees specialising in this category
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Match on name or email
+          title: Q
+        description: Match on name or email
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 25
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonPage'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/people/{person_id}:
+    get:
+      tags:
+      - people
+      summary: Get a person
+      operationId: get_person
+      security:
+      - AccessToken: []
+      parameters:
+      - name: person_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Person Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Person'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/people/{person_id}/categories:
+    get:
+      tags:
+      - people
+      summary: List the categories an assignee specialises in
+      operationId: list_person_categories
+      security:
+      - AccessToken: []
+      parameters:
+      - name: person_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Person Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+                title: Response List Person Categories
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/vendors:
+    get:
+      tags:
+      - vendors
+      summary: List vendors
+      description: 'Employees of a vendor: `GET /people?vendorId=...`.'
+      operationId: list_vendors
+      security:
+      - AccessToken: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Match on name
+          title: Q
+        description: Match on name
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 25
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorPage'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/vendors/{vendor_id}:
+    get:
+      tags:
+      - vendors
+      summary: Get a vendor
+      operationId: get_vendor
+      security:
+      - AccessToken: []
+      parameters:
+      - name: vendor_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Vendor Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vendor'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/departments:
+    get:
+      tags:
+      - departments
+      summary: List departments
+      description: 'Owned assets: `GET /assets?departmentId=...`. Supervisors: `GET
+        /people?departmentId=...`.'
+      operationId: list_departments
+      security:
+      - AccessToken: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Match on name
+          title: Q
+        description: Match on name
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 25
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentPage'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/departments/{department_id}:
+    get:
+      tags:
+      - departments
+      summary: Get a department
+      operationId: get_department
+      security:
+      - AccessToken: []
+      parameters:
+      - name: department_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Department Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Department'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/categories:
+    get:
+      tags:
+      - categories
+      summary: List categories
+      description: 'Specialised assignees: `GET /people?categoryId=...`. Assets: `GET
+        /assets?categoryId=...`.'
+      operationId: list_categories
+      security:
+      - AccessToken: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Match on name
+          title: Q
+        description: Match on name
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 25
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryPage'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/categories/{category_id}:
+    get:
+      tags:
+      - categories
+      summary: Get a category
+      operationId: get_category
+      security:
+      - AccessToken: []
+      parameters:
+      - name: category_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Category Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/assets:
+    get:
+      tags:
+      - assets
+      summary: List assets
+      operationId: list_assets
+      security:
+      - AccessToken: []
+      parameters:
+      - name: departmentId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Departmentid
+      - name: categoryId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Categoryid
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Match on name
+          title: Q
+        description: Match on name
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 25
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetPage'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/assets/{asset_id}:
+    get:
+      tags:
+      - assets
+      summary: Get an asset
+      description: 'Tickets about an asset: `GET /tickets?assetId=...`.'
+      operationId: get_asset
+      security:
+      - AccessToken: []
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Asset Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Asset'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tickets:
+    get:
+      tags:
+      - tickets
+      summary: List tickets
+      description: 'Results are scoped to the caller: requesters see their own tickets,
+
+        assignees see tickets assigned to them, supervisors see their department''s.'
+      operationId: list_tickets
+      security:
+      - AccessToken: []
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/TicketStatus'
+          - type: 'null'
+          title: Status
+      - name: priority
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/TicketPriority'
+          - type: 'null'
+          title: Priority
+      - name: requesterId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Requesterid
+      - name: assigneeId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          description: Currently assigned (not unassigned) to this person
+          title: Assigneeid
+        description: Currently assigned (not unassigned) to this person
+      - name: supervisorId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Supervisorid
+      - name: assetId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Assetid
+      - name: departmentId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          description: Department owning the ticket's asset
+          title: Departmentid
+        description: Department owning the ticket's asset
+      - name: createdFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Createdfrom
+      - name: createdTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Createdto
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Match on title or description
+          title: Q
+        description: Match on title or description
+      - name: sortBy
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/TicketSortField'
+          default: createdAt
+      - name: order
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/SortOrder'
+          default: desc
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 25
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketPage'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - tickets
+      summary: Create a ticket
+      description: Created with status `open`; the requester is the caller.
+      operationId: create_ticket
+      security:
+      - AccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tickets/{ticket_id}:
+    get:
+      tags:
+      - tickets
+      summary: Get a ticket
+      operationId: get_ticket
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - tickets
+      summary: Update a ticket (supervisor only)
+      description: Used by supervisors to set the asset, priority and supervisor,
+        and to move the ticket through its statuses. Every status change is logged
+        in the status history; moving to `closed` sets `closedAt`.
+      operationId: update_ticket
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tickets/{ticket_id}/assignments:
+    get:
+      tags:
+      - tickets
+      summary: List a ticket's assignment history
+      operationId: list_ticket_assignments
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TicketAssignment'
+                title: Response List Ticket Assignments
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - tickets
+      summary: Assign a ticket to an assignee (supervisor only)
+      operationId: create_ticket_assignment
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketAssignmentCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketAssignment'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tickets/{ticket_id}/assignments/{assignment_id}:
+    delete:
+      tags:
+      - tickets
+      summary: Unassign (supervisor only)
+      description: Does not delete the row; sets `unassignedAt` so history is preserved.
+      operationId: delete_ticket_assignment
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      - name: assignment_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Assignment Id
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tickets/{ticket_id}/attachments:
+    get:
+      tags:
+      - tickets
+      summary: List a ticket's attachments
+      operationId: list_ticket_attachments
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      - name: kind
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/AttachmentKind'
+          - type: 'null'
+          title: Kind
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TicketAttachment'
+                title: Response List Ticket Attachments
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - tickets
+      summary: Add an attachment to a ticket
+      description: '`issue_evidence` is added by the requester, `completion_proof`
+        by the assignee.'
+      operationId: create_ticket_attachment
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketAttachmentCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketAttachment'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tickets/{ticket_id}/comments:
+    get:
+      tags:
+      - tickets
+      summary: List a ticket's comments
+      operationId: list_ticket_comments
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TicketComment'
+                title: Response List Ticket Comments
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - tickets
+      summary: Comment on a ticket
+      operationId: create_ticket_comment
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketCommentCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketComment'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tickets/{ticket_id}/status-history:
+    get:
+      tags:
+      - tickets
+      summary: List a ticket's status changes
+      operationId: list_ticket_status_history
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TicketStatusHistoryEntry'
+                title: Response List Ticket Status History
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    Asset:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        departmentId:
+          type: string
+          format: uuid
+          title: Departmentid
+        categoryId:
+          type: string
+          format: uuid
+          title: Categoryid
+      type: object
+      required:
+      - id
+      - name
+      - departmentId
+      - categoryId
+      title: Asset
+    AssetPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/Asset'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: AssetPage
+    AttachmentKind:
+      type: string
+      enum:
+      - issue_evidence
+      - completion_proof
+      title: AttachmentKind
+    Category:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - id
+      - name
+      title: Category
+    CategoryPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/Category'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: CategoryPage
+    Department:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - id
+      - name
+      title: Department
+    DepartmentPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/Department'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: DepartmentPage
+    ErrorResponse:
+      properties:
+        detail:
+          type: string
+          title: Detail
+      type: object
+      required:
+      - detail
+      title: ErrorResponse
+      description: Body returned by every non-2xx response (FastAPI's default shape).
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    Person:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        email:
+          type: string
+          title: Email
+        phone:
+          type: string
+          title: Phone
+        role:
+          $ref: '#/components/schemas/Role'
+        vendorId:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Vendorid
+        departmentId:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Departmentid
+      type: object
+      required:
+      - id
+      - name
+      - email
+      - phone
+      - role
+      title: Person
+    PersonPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/Person'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: PersonPage
+    Role:
+      type: string
+      enum:
+      - requester
+      - assignee
+      - supervisor
+      title: Role
+    SortOrder:
+      type: string
+      enum:
+      - asc
+      - desc
+      title: SortOrder
+    Ticket:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        title:
+          type: string
+          title: Title
+        description:
+          type: string
+          title: Description
+        location:
+          type: string
+          title: Location
+        priority:
+          $ref: '#/components/schemas/TicketPriority'
+        status:
+          $ref: '#/components/schemas/TicketStatus'
+        createdAt:
+          type: string
+          format: date-time
+          title: Createdat
+        closedAt:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Closedat
+        requesterId:
+          type: string
+          format: uuid
+          title: Requesterid
+        assetId:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Assetid
+        supervisorId:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Supervisorid
+      type: object
+      required:
+      - id
+      - title
+      - description
+      - location
+      - priority
+      - status
+      - createdAt
+      - requesterId
+      title: Ticket
+    TicketAssignment:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        ticketId:
+          type: string
+          format: uuid
+          title: Ticketid
+        assigneeId:
+          type: string
+          format: uuid
+          title: Assigneeid
+        assignedAt:
+          type: string
+          format: date-time
+          title: Assignedat
+        unassignedAt:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Unassignedat
+      type: object
+      required:
+      - id
+      - ticketId
+      - assigneeId
+      - assignedAt
+      title: TicketAssignment
+    TicketAssignmentCreate:
+      properties:
+        assigneeId:
+          type: string
+          format: uuid
+          title: Assigneeid
+      type: object
+      required:
+      - assigneeId
+      title: TicketAssignmentCreate
+    TicketAttachment:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        ticketId:
+          type: string
+          format: uuid
+          title: Ticketid
+        uploadedById:
+          type: string
+          format: uuid
+          title: Uploadedbyid
+        kind:
+          $ref: '#/components/schemas/AttachmentKind'
+        storageUrl:
+          type: string
+          title: Storageurl
+        uploadedAt:
+          type: string
+          format: date-time
+          title: Uploadedat
+      type: object
+      required:
+      - id
+      - ticketId
+      - uploadedById
+      - kind
+      - storageUrl
+      - uploadedAt
+      title: TicketAttachment
+    TicketAttachmentCreate:
+      properties:
+        kind:
+          $ref: '#/components/schemas/AttachmentKind'
+        storageUrl:
+          type: string
+          title: Storageurl
+      type: object
+      required:
+      - kind
+      - storageUrl
+      title: TicketAttachmentCreate
+    TicketComment:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        ticketId:
+          type: string
+          format: uuid
+          title: Ticketid
+        authorId:
+          type: string
+          format: uuid
+          title: Authorid
+        body:
+          type: string
+          title: Body
+        createdAt:
+          type: string
+          format: date-time
+          title: Createdat
+      type: object
+      required:
+      - id
+      - ticketId
+      - authorId
+      - body
+      - createdAt
+      title: TicketComment
+    TicketCommentCreate:
+      properties:
+        body:
+          type: string
+          title: Body
+      type: object
+      required:
+      - body
+      title: TicketCommentCreate
+    TicketCreate:
+      properties:
+        title:
+          type: string
+          title: Title
+        description:
+          type: string
+          title: Description
+        location:
+          type: string
+          title: Location
+        priority:
+          $ref: '#/components/schemas/TicketPriority'
+          default: medium
+      type: object
+      required:
+      - title
+      - description
+      - location
+      title: TicketCreate
+      description: What a requester submits. The asset is deliberately absent.
+    TicketPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/Ticket'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: TicketPage
+    TicketPriority:
+      type: string
+      enum:
+      - low
+      - medium
+      - high
+      - critical
+      title: TicketPriority
+    TicketSortField:
+      type: string
+      enum:
+      - createdAt
+      - closedAt
+      - priority
+      title: TicketSortField
+    TicketStatus:
+      type: string
+      enum:
+      - open
+      - assigned
+      - in_progress
+      - resolved
+      - closed
+      title: TicketStatus
+    TicketStatusHistoryEntry:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        ticketId:
+          type: string
+          format: uuid
+          title: Ticketid
+        fromStatus:
+          anyOf:
+          - $ref: '#/components/schemas/TicketStatus'
+          - type: 'null'
+        toStatus:
+          $ref: '#/components/schemas/TicketStatus'
+        changedById:
+          type: string
+          format: uuid
+          title: Changedbyid
+        changedAt:
+          type: string
+          format: date-time
+          title: Changedat
+      type: object
+      required:
+      - id
+      - ticketId
+      - toStatus
+      - changedById
+      - changedAt
+      title: TicketStatusHistoryEntry
+    TicketUpdate:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        location:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Location
+        priority:
+          anyOf:
+          - $ref: '#/components/schemas/TicketPriority'
+          - type: 'null'
+        status:
+          anyOf:
+          - $ref: '#/components/schemas/TicketStatus'
+          - type: 'null'
+        assetId:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Assetid
+        supervisorId:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Supervisorid
+      type: object
+      title: TicketUpdate
+      description: Partial update; omitted fields are left unchanged.
+    TokenRequest:
+      properties:
+        email:
+          type: string
+          title: Email
+        password:
+          type: string
+          title: Password
+      type: object
+      required:
+      - email
+      - password
+      title: TokenRequest
+    TokenResponse:
+      properties:
+        accessToken:
+          type: string
+          title: Accesstoken
+        tokenType:
+          type: string
+          title: Tokentype
+          default: bearer
+        expiresIn:
+          type: integer
+          title: Expiresin
+          description: Lifetime of the token in seconds
+      type: object
+      required:
+      - accessToken
+      - expiresIn
+      title: TokenResponse
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    Vendor:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - id
+      - name
+      title: Vendor
+    VendorPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/Vendor'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: VendorPage
+  securitySchemes:
+    AccessToken:
+      type: http
+      description: Access token obtained from `POST /api/v1/auth/token`.
+      scheme: bearer
