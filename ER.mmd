@@ -1,6 +1,7 @@
 erDiagram
   PERSON ||--o{ TICKET : "requests"
   PERSON ||--o{ TICKET_ASSIGNMENT : "assigned as"
+  PERSON ||--o| PERSON_CREDENTIAL : "logs in with"
   VENDOR ||--o{ PERSON : "employs (LARP)"
   DEPARTMENT ||--o{ ASSET : "owns"
   DEPARTMENT ||--o{ PERSON : "supervisors belong to"
@@ -47,4 +48,9 @@ erDiagram
     enum kind "issue_evidence, completion_proof"
     string storageUrl
     timestamptz uploadedAt
+  }
+  PERSON_CREDENTIAL {
+    uuid personID PK, FK
+    string passwordHash "Argon2 (pwdlib), never exposed by the API"
+    timestamptz updatedAt
   }
