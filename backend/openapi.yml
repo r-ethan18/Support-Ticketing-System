@@ -59,6 +59,52 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
       - AccessToken: []
+  /api/v1/admins:
+    post:
+      tags:
+      - admins
+      summary: Create an admin (admin only)
+      description: Creates a person with role `admin` and the given password.
+      operationId: create_admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Person'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Resource already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - AccessToken: []
   /api/v1/people:
     get:
       tags:
@@ -1321,6 +1367,29 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    AdminCreate:
+      properties:
+        name:
+          type: string
+          title: Name
+        email:
+          type: string
+          title: Email
+        phone:
+          type: string
+          title: Phone
+        password:
+          type: string
+          maxLength: 128
+          minLength: 12
+          title: Password
+      type: object
+      required:
+      - name
+      - email
+      - phone
+      - password
+      title: AdminCreate
     Asset:
       properties:
         id:

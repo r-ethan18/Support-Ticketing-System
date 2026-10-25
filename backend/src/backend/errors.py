@@ -16,6 +16,9 @@ UNAUTHORIZED: dict[int | str, dict[str, Any]] = {
 FORBIDDEN: dict[int | str, dict[str, Any]] = {
     403: {"model": ErrorResponse, "description": "Caller's role may not do this"},
 }
+CONFLICT: dict[int | str, dict[str, Any]] = {
+    409: {"model": ErrorResponse, "description": "Resource already exists"},
+}
 NOT_FOUND: dict[int | str, dict[str, Any]] = {
     404: {"model": ErrorResponse, "description": "Resource not found"},
 }
