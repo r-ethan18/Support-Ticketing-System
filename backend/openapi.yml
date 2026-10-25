@@ -651,7 +651,9 @@ paths:
       summary: List tickets
       description: 'Results are scoped to the caller: requesters see their own tickets,
 
-        assignees see tickets assigned to them, supervisors see their department''s.'
+        assignees see tickets assigned to them, supervisors see their department''s,
+
+        admins see all.'
       operationId: list_tickets
       security:
       - AccessToken: []
@@ -878,7 +880,7 @@ paths:
     patch:
       tags:
       - tickets
-      summary: Update a ticket (supervisor only)
+      summary: Update a ticket (supervisor or admin)
       description: Used by supervisors to set the asset, priority and supervisor,
         and to move the ticket through its statuses. Every status change is logged
         in the status history; moving to `closed` sets `closedAt`.
@@ -977,7 +979,7 @@ paths:
     post:
       tags:
       - tickets
-      summary: Assign a ticket to an assignee (supervisor only)
+      summary: Assign a ticket to an assignee (supervisor or admin)
       operationId: create_ticket_assignment
       security:
       - AccessToken: []
@@ -1030,7 +1032,7 @@ paths:
     delete:
       tags:
       - tickets
-      summary: Unassign (supervisor only)
+      summary: Unassign (supervisor or admin)
       description: Does not delete the row; sets `unassignedAt` so history is preserved.
       operationId: delete_ticket_assignment
       security:
@@ -1531,6 +1533,7 @@ components:
       - requester
       - assignee
       - supervisor
+      - admin
       title: Role
     SortOrder:
       type: string
