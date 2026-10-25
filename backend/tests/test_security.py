@@ -76,7 +76,7 @@ def test_unsigned_token_rejected() -> None:
         decode_access_token(token)
 
 
-@pytest.mark.parametrize("overrides", [{"role": "admin"}, {"sub": "not-a-uuid"}])
+@pytest.mark.parametrize("overrides", [{"role": "root"}, {"sub": "not-a-uuid"}])
 def test_bad_claims_rejected(overrides: dict[str, object]) -> None:
     with pytest.raises(InvalidAccessToken):
         decode_access_token(_forge(**overrides))
