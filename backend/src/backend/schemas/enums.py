@@ -5,6 +5,7 @@ class Role(StrEnum):
     requester = "requester"
     assignee = "assignee"
     supervisor = "supervisor"
+    admin = "admin"
 
 
 # NOTE: the ER diagram leaves the values of priority/status unspecified.

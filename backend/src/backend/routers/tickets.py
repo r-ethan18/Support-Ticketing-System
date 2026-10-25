@@ -64,7 +64,8 @@ async def list_tickets(
     order: SortOrder = SortOrder.desc,
 ) -> TicketPage:
     """Results are scoped to the caller: requesters see their own tickets,
-    assignees see tickets assigned to them, supervisors see their department's."""
+    assignees see tickets assigned to them, supervisors see their department's,
+    admins see all."""
     not_implemented()
 
 
@@ -85,7 +86,7 @@ async def get_ticket(ticket_id: UUID) -> Ticket:
 
 @router.patch(
     "/{ticket_id}",
-    summary="Update a ticket (supervisor only)",
+    summary="Update a ticket (supervisor or admin)",
     description=(
         "Used by supervisors to set the asset, priority and supervisor, and to move the"
         " ticket through its statuses. Every status change is logged in the status history;"
@@ -110,7 +111,7 @@ async def list_ticket_assignments(ticket_id: UUID) -> list[TicketAssignment]:
 @router.post(
     "/{ticket_id}/assignments",
     status_code=http.HTTP_201_CREATED,
-    summary="Assign a ticket to an assignee (supervisor only)",
+    summary="Assign a ticket to an assignee (supervisor or admin)",
     dependencies=[supervisor_only],
     responses={**NOT_FOUND, **FORBIDDEN},
 )
@@ -123,7 +124,7 @@ async def create_ticket_assignment(
 @router.delete(
     "/{ticket_id}/assignments/{assignment_id}",
     status_code=http.HTTP_204_NO_CONTENT,
-    summary="Unassign (supervisor only)",
+    summary="Unassign (supervisor or admin)",
     description="Does not delete the row; sets `unassignedAt` so history is preserved.",
     dependencies=[supervisor_only],
     responses={**NOT_FOUND, **FORBIDDEN},

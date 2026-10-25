@@ -63,10 +63,13 @@ CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
 
 
 def require_roles(*roles: Role) -> Callable[..., CurrentUser]:
-    """Dependency factory: allow only callers whose role is in `roles`."""
+    """Dependency factory: allow only callers whose role is in `roles`.
+
+    `admin` always passes, so new role-gated routes need no admin special-casing.
+    """
 
     async def dependency(user: CurrentUserDep) -> CurrentUser:
-        if user.role not in roles:
+        if user.role is not Role.admin and user.role not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role"
             )
