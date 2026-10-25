@@ -13,8 +13,8 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
-from backend.errors import not_implemented
 from backend.schemas.enums import Role
+from backend.security import InvalidAccessToken, decode_access_token
 
 bearer_scheme = HTTPBearer(
     scheme_name="AccessToken",
@@ -31,8 +31,20 @@ class CurrentUser(BaseModel):
 
 
 def verify_access_token(token: str) -> CurrentUser:
-    """Validate `token` and return the caller. Raise 401 if it is invalid/expired."""
-    not_implemented()
+    """Validate `token` and return the caller. Raise 401 if it is invalid/expired.
+
+    Stateless: the role comes from the token, so a role change only takes effect
+    once the person's current token expires.
+    """
+    try:
+        person_id, role = decode_access_token(token)
+    except InvalidAccessToken:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from None
+    return CurrentUser(id=person_id, role=role)
 
 
 async def get_current_user(
