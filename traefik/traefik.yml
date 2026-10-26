@@ -1,0 +1,15 @@
+entryPoints:
+  web:
+    address: ":80"
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: sts-network
+
+api:
+  dashboard: true
+  insecure: true  # dev only
+
+log:
+  level: INFO
