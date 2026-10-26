@@ -1,4 +1,17 @@
 services:
+  traefik:
+    image: traefik:v3.6    
+    container_name: sts-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - sts-network
+
   backend:
     build:
       context: ./backend
@@ -6,13 +19,16 @@ services:
       target: production
     container_name: sts-backend
     restart: unless-stopped
-    ports:
-      - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
       - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET (>= 32 chars) in .env}
     networks:
       - sts-network
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.backend.rule=Host(`localhost`) && PathPrefix(`/api`)
+      - traefik.http.routers.backend.entrypoints=web
+      - traefik.http.services.backend.loadbalancer.server.port=8000
 
   frontend:
     build:
@@ -21,14 +37,17 @@ services:
       target: production
     container_name: sts-frontend
     restart: unless-stopped
-    ports:
-      - "3000:3000"
     environment:
       - NODE_ENV=production
     depends_on:
       - backend
     networks:
       - sts-network
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.frontend.rule=Host(`localhost`)
+      - traefik.http.routers.frontend.entrypoints=web
+      - traefik.http.services.frontend.loadbalancer.server.port=3000
 
 networks:
   sts-network:
