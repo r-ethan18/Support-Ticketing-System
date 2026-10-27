@@ -41,7 +41,7 @@ def client() -> Iterator[TestClient]:
             for role in Role
         }
     )
-    app = create_app()
+    app = create_app(with_database=False)
     app.dependency_overrides[get_credential_store] = lambda: store
     with TestClient(app) as c:
         yield c

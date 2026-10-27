@@ -3,6 +3,7 @@ from importlib.metadata import PackageNotFoundError, version
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
+from backend.db import lifespan
 from backend.routers import api_router
 
 
@@ -19,7 +20,7 @@ def _version() -> str:
         return "0.0.0"
 
 
-def create_app() -> FastAPI:
+def create_app(*, with_database: bool = True) -> FastAPI:
     app = FastAPI(
         title="Support Ticketing System API",
         version=_version(),
@@ -28,11 +29,12 @@ def create_app() -> FastAPI:
             " `POST /api/v1/auth/token` and send the token as a Bearer header."
         ),
         generate_unique_id_function=_operation_id,
+        lifespan=lifespan if with_database else None,
     )
     # TODO(first-run): POST /admins needs an admin token, so the first admin cannot
     # be created through the API. On startup, if no admin exists, create one from
     # ADMIN_EMAIL / ADMIN_PASSWORD (and refuse to start if they are unset). At least
-    # one admin account must exist after first run. Needs the Postgres layer.
+    # one admin account must exist after first run. Postgres layer: backend.db.
     app.include_router(api_router)
     return app
 
