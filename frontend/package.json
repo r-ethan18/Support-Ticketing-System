@@ -2,8 +2,12 @@
 	"name": "frontend",
 	"version": "1.0.0",
 	"description": "",
-	"main": "index.js",
+	"type": "module",
 	"scripts": {
+		"dev": "vite",
+		"build": "tsc && vite build",
+		"preview": "vite preview",
+		"type-check": "tsc --noEmit",
 		"test": "echo \"Error: no test specified\" && exit 1",
 		"lint": "biome lint .",
 		"format": "biome format --write .",
@@ -23,7 +27,17 @@
 		"@biomejs/biome": "^2.5.15",
 		"@commitlint/cli": "^21.2.3",
 		"@commitlint/config-conventional": "^21.2.3",
+		"@types/node": "^26.6.5",
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0",
+		"@vitejs/plugin-react": "^6.1.2",
 		"lint-staged": "^17.6.0",
-		"simple-git-hooks": "^2.14.0"
+		"simple-git-hooks": "^2.14.0",
+		"typescript": "^7.0.2",
+		"vite": "^8.3.5"
+	},
+	"dependencies": {
+		"react": "^19.3.1",
+		"react-dom": "^19.3.1"
 	}
 }

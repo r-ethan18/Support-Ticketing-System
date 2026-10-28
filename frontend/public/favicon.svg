@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+	<title>Support Ticketing System Favicon</title>
+	<rect width="32" height="32" rx="8" fill="#4F46E5"/>
+	<path d="M9 11C9 9.89543 9.89543 9 11 9H21C22.1046 9 23 9.89543 23 11V14.5C21.6193 14.5 20.5 15.6193 20.5 17C20.5 18.3807 21.6193 19.5 23 19.5V21C23 22.1046 22.1046 23 21 23H11C9.89543 23 9 22.1046 9 21V19.5C10.3807 19.5 11.5 18.3807 11.5 17C11.5 15.6193 10.3807 14.5 9 14.5V11Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+	<circle cx="16" cy="16" r="1.5" fill="white"/>
+</svg>
