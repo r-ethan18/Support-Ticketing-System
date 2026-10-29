@@ -52,20 +52,17 @@ def test_protected_route_rejects_bad_token(client: TestClient) -> None:
 
 
 def test_valid_token_passes_auth(client: TestClient) -> None:
-    # Handlers are still skeletons, so getting 501 means auth let us through.
-    response = client.get("/api/v1/tickets", headers=login(client, Role.requester))
+    # The comments route is still a skeleton, so 501 means auth let us through.
+    response = client.get(f"{TICKET}/comments", headers=login(client, Role.requester))
     assert response.status_code == 501
 
 
 def test_supervisor_only_route(client: TestClient) -> None:
-    patch = {"priority": "high"}
-    as_requester = client.patch(
-        TICKET, json=patch, headers=login(client, Role.requester)
-    )
-    as_assignee = client.patch(TICKET, json=patch, headers=login(client, Role.assignee))
-    as_supervisor = client.patch(
-        TICKET, json=patch, headers=login(client, Role.supervisor)
-    )
+    body = {"assigneeId": "00000000-0000-0000-0000-000000000001"}
+    url = f"{TICKET}/assignments"
+    as_requester = client.post(url, json=body, headers=login(client, Role.requester))
+    as_assignee = client.post(url, json=body, headers=login(client, Role.assignee))
+    as_supervisor = client.post(url, json=body, headers=login(client, Role.supervisor))
     assert as_requester.status_code == 403
     assert as_assignee.status_code == 403
     assert as_supervisor.status_code == 501
@@ -73,7 +70,6 @@ def test_supervisor_only_route(client: TestClient) -> None:
 
 def test_admin_passes_every_role_gate(client: TestClient) -> None:
     admin = login(client, Role.admin)
-    assert client.patch(TICKET, json={}, headers=admin).status_code == 501
     assert (
         client.post(
             f"{TICKET}/assignments",
