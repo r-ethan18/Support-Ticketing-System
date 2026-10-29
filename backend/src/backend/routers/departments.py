@@ -1,12 +1,21 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query, status
 
-from backend.db import PoolDep, fetch_or_404, fetch_page, like_pattern
-from backend.errors import NOT_FOUND
+from backend.auth import require_roles
+from backend.db import (
+    PoolDep,
+    delete_by_id,
+    fetch_or_404,
+    fetch_page,
+    insert_named,
+    like_pattern,
+)
+from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND
 from backend.routers.deps import PaginationDep
-from backend.schemas.assets import Department, DepartmentPage
+from backend.schemas.assets import Department, DepartmentCreate, DepartmentPage
+from backend.schemas.enums import Role
 
 router = APIRouter(prefix="/departments", tags=["departments"])
 
@@ -46,3 +55,26 @@ async def get_department(department_id: UUID, pool: PoolDep) -> Department:
         [department_id],
         "Department",
     )
+
+
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a department (admin only)",
+    dependencies=[Depends(require_roles(Role.admin))],
+    responses={**FORBIDDEN, **CONFLICT},
+)
+async def create_department(body: DepartmentCreate, pool: PoolDep) -> Department:
+    return await insert_named(pool, Department, "department", body.name, "Department")
+
+
+@router.delete(
+    "/{department_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a department (admin only)",
+    description="Fails with 409 while people, assets or tickets still refer to it.",
+    dependencies=[Depends(require_roles(Role.admin))],
+    responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},
+)
+async def delete_department(department_id: UUID, pool: PoolDep) -> None:
+    await delete_by_id(pool, "department", department_id, "Department")

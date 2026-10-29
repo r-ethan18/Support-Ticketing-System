@@ -1,12 +1,21 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query, status
 
-from backend.db import PoolDep, fetch_or_404, fetch_page, like_pattern
-from backend.errors import NOT_FOUND
+from backend.auth import require_roles
+from backend.db import (
+    PoolDep,
+    delete_by_id,
+    fetch_or_404,
+    fetch_page,
+    insert_named,
+    like_pattern,
+)
+from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND
 from backend.routers.deps import PaginationDep
-from backend.schemas.assets import Vendor, VendorPage
+from backend.schemas.assets import Vendor, VendorCreate, VendorPage
+from backend.schemas.enums import Role
 
 router = APIRouter(prefix="/vendors", tags=["vendors"])
 
@@ -40,3 +49,26 @@ async def get_vendor(vendor_id: UUID, pool: PoolDep) -> Vendor:
     return await fetch_or_404(
         pool, Vendor, "SELECT id, name FROM vendor WHERE id = %s", [vendor_id], "Vendor"
     )
+
+
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a vendor (admin only)",
+    dependencies=[Depends(require_roles(Role.admin))],
+    responses={**FORBIDDEN, **CONFLICT},
+)
+async def create_vendor(body: VendorCreate, pool: PoolDep) -> Vendor:
+    return await insert_named(pool, Vendor, "vendor", body.name, "Vendor")
+
+
+@router.delete(
+    "/{vendor_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a vendor (admin only)",
+    description="Fails with 409 while people, assets or tickets still refer to it.",
+    dependencies=[Depends(require_roles(Role.admin))],
+    responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},
+)
+async def delete_vendor(vendor_id: UUID, pool: PoolDep) -> None:
+    await delete_by_id(pool, "vendor", vendor_id, "Vendor")
