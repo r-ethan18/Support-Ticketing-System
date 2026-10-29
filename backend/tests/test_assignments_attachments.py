@@ -33,14 +33,14 @@ class Scene:
         seed._created.append(("ticket", self.ticket))
         self.url = f"{API}/{self.ticket}"
 
-    def assignee(self, *, specialises: bool = True):
-        person_id, headers = login_as(self.client, self.seed, Role.assignee)
-        if specialises:
-            self.seed.conn.execute(
-                "INSERT INTO assignee_category (person_id, category_id)"
-                " VALUES (%s, %s)",
-                (person_id, self.cat),
-            )
+    def assignee(self, *, responsible: bool = True):
+        """An assignee employed by a new vendor, linked to the asset by default."""
+        vendor = self.seed.insert("vendor", name=f"V {uuid4().hex[:8]}")
+        person_id, headers = login_as(
+            self.client, self.seed, Role.assignee, vendor_id=vendor
+        )
+        if responsible:
+            self.seed.link_vendor(self.asset, vendor)
         return person_id, headers
 
     def assign(self, assignee_id, headers=None):
@@ -81,16 +81,16 @@ def test_duplicate_active_assignment_conflicts(scene: Scene) -> None:
     assert scene.assign(person).status_code == 409
 
 
-def test_assign_rejects_non_assignees_and_wrong_specialty(scene: Scene) -> None:
+def test_assign_rejects_non_assignees_and_unlinked_vendor(scene: Scene) -> None:
     assert scene.assign(scene.owner_id).status_code == 422
     assert scene.assign(uuid4()).status_code == 422
     # Before the ticket has an asset, anyone with the assignee role will do...
-    generalist, _ = scene.assignee(specialises=False)
-    # ...but once it has one, the category must match.
+    generalist, _ = scene.assignee(responsible=False)
+    # ...but once it has one, the assignee's vendor must be responsible for it.
     scene.client.patch(scene.url, json={"assetId": str(scene.asset)}, headers=scene.sup)
     assert scene.assign(generalist).status_code == 422
-    specialist, _ = scene.assignee()
-    assert scene.assign(specialist).status_code == 201
+    responsible, _ = scene.assignee()
+    assert scene.assign(responsible).status_code == 201
 
 
 def test_only_supervisors_assign_and_unknown_ticket(

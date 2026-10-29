@@ -314,7 +314,7 @@ async def list_ticket_assignments(
     summary="Assign a ticket to an assignee (supervisor or admin)",
     description=(
         "Several assignees can work on one ticket. Once the ticket has an asset, only"
-        " assignees specialising in the asset's category can be assigned. Assigning an"
+        " assignees employed by a vendor responsible for that asset can be assigned. Assigning an"
         " `open` ticket moves it to `assigned`."
     ),
     dependencies=[supervisor_only],
@@ -338,15 +338,15 @@ async def create_ticket_assignment(
             )
         if ticket.asset_id:
             cur = await conn.execute(
-                "SELECT 1 FROM asset a JOIN assignee_category ac"
-                " ON ac.category_id = a.category_id"
-                " WHERE a.id = %s AND ac.person_id = %s",
+                "SELECT 1 FROM asset_vendor av JOIN person p"
+                " ON p.vendor_id = av.vendor_id"
+                " WHERE av.asset_id = %s AND p.id = %s",
                 (ticket.asset_id, body.assignee_id),
             )
             if not await cur.fetchone():
                 raise HTTPException(
                     http.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail="Assignee does not specialise in this asset's category",
+                    detail="Assignee's vendor is not responsible for this asset",
                 )
         try:
             async with conn.cursor(row_factory=class_row(TicketAssignment)) as cur:
