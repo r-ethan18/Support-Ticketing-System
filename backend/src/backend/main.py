@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
 from backend.db import lifespan
+from backend.metrics import instrument
 from backend.routers import api_router
 
 
@@ -32,6 +33,7 @@ def create_app(*, with_database: bool = True) -> FastAPI:
         lifespan=lifespan if with_database else None,
     )
     app.include_router(api_router)
+    instrument(app)
     return app
 
 

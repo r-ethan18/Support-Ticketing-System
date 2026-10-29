@@ -31,6 +31,7 @@ def _settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("JWT_SECRET", SECRET)
     monkeypatch.setenv("ADMIN_EMAIL", "bootstrap-admin@example.com")
     monkeypatch.setenv("ADMIN_PASSWORD", PASSWORD)
+    monkeypatch.setenv("METRICS_PORT", "0")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

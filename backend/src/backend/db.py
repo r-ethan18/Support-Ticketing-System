@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from backend.accounts import ensure_admin
 from backend.config import get_settings
+from backend.metrics import serve_metrics
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -34,7 +35,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await init_schema(pool)
         await ensure_admin(pool)
         app.state.db_pool = pool
-        yield
+        with serve_metrics(pool):
+            yield
     finally:
         await pool.close()
 

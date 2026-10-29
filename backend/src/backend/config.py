@@ -34,6 +34,8 @@ class Settings:
     # Only used to create the first admin when none exists.
     admin_email: str = ""
     admin_password: str = ""
+    # Port for the Prometheus listener; 0 disables it.
+    metrics_port: int = 9100
 
 
 @lru_cache
@@ -62,4 +64,5 @@ def get_settings() -> Settings:
         ),
         admin_email=os.environ.get("ADMIN_EMAIL", ""),
         admin_password=os.environ.get("ADMIN_PASSWORD", ""),
+        metrics_port=int(os.environ.get("METRICS_PORT", "9100")),
     )

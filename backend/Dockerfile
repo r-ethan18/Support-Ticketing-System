@@ -16,6 +16,6 @@ COPY --from=build /app/.venv ./.venv
 COPY --from=build /app/src ./src
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
-EXPOSE 8000
+EXPOSE 8000 9100
 
 CMD ["python", "-m", "backend"]

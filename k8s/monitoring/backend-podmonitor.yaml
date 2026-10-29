@@ -1,0 +1,18 @@
+# Scraped by the Prometheus from kube-prometheus-stack. The stack's Prometheus
+# only picks up monitors matching its `podMonitorSelector`; by default that is
+# the Helm release label, so set `release` to your release name.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: sts-backend
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sts-backend
+  podMetricsEndpoints:
+    # Refers to the named container port (9100) on the backend pods.
+    - port: metrics
+      path: /metrics
+      interval: 30s
