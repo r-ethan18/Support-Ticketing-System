@@ -164,7 +164,11 @@ BEGIN
             ('ticket_assignment', 'assignee_id', 'person', 'n'),
             ('ticket_attachment', 'uploaded_by_id', 'person', 'n'),
             ('ticket_comment', 'author_id', 'person', 'n'),
-            ('ticket_status_history', 'changed_by_id', 'person', 'n')
+            ('ticket_status_history', 'changed_by_id', 'person', 'n'),
+            -- Removing an asset sends its tickets back to triage; removing a
+            -- vendor drops its responsibilities.
+            ('ticket', 'asset_id', 'asset', 'n'),
+            ('asset_vendor', 'vendor_id', 'vendor', 'c')
         ) AS v (tbl, col, ref, on_delete)
     LOOP
         IF NOT EXISTS (

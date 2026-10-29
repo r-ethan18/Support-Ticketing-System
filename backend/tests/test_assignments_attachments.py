@@ -290,18 +290,41 @@ def test_deleting_a_supervisor_clears_ticket_supervisor(
     assert db_client.get(scene.url, headers=scene.admin).json()["supervisorId"] is None
 
 
-def test_cannot_change_role_of_assignee_with_active_assignment(
+def test_changing_an_assignees_role_takes_them_off_their_tickets(
     scene: Scene, db_client: TestClient
 ) -> None:
     person, _ = scene.assignee()
-    assignment = scene.assign(person).json()["id"]
-    url = f"/api/v1/people/{person}/role"
-    assert (
-        db_client.put(url, json={"role": "requester"}, headers=scene.admin).status_code
-        == 409
+    scene.assign(person)
+    response = db_client.put(
+        f"/api/v1/people/{person}/role",
+        json={"role": "requester"},
+        headers=scene.admin,
     )
-    db_client.delete(f"{scene.url}/assignments/{assignment}", headers=scene.sup)
+    assert response.status_code == 200
+    assert scene.status() == "open"
+    assignments = db_client.get(f"{scene.url}/assignments", headers=scene.admin).json()
+    assert all(a["unassignedAt"] is not None for a in assignments)
+
+
+def test_deleting_a_vendor_unassigns_and_demotes_its_technicians(
+    scene: Scene, db_client: TestClient
+) -> None:
+    person, _ = scene.assignee()
+    scene.assign(person)
+    vendor = db_client.get(f"/api/v1/people/{person}", headers=scene.admin).json()[
+        "vendorId"
+    ]
+
     assert (
-        db_client.put(url, json={"role": "requester"}, headers=scene.admin).status_code
-        == 200
+        db_client.delete(f"/api/v1/vendors/{vendor}", headers=scene.admin).status_code
+        == 204
+    )
+
+    assert scene.status() == "open"
+    demoted = db_client.get(f"/api/v1/people/{person}", headers=scene.admin).json()
+    assert demoted["role"] == "requester"
+    assert demoted["vendorId"] is None
+    assert (
+        db_client.get(f"/api/v1/vendors/{vendor}", headers=scene.admin).status_code
+        == 404
     )

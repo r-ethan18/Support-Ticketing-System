@@ -1,12 +1,12 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from backend.auth import require_roles
+from backend.auth import CurrentUserDep, require_roles
+from backend.cascade import remove_vendor
 from backend.db import (
     PoolDep,
-    delete_by_id,
     fetch_or_404,
     fetch_page,
     insert_named,
@@ -73,9 +73,15 @@ async def create_vendor(body: VendorCreate, pool: PoolDep) -> Vendor:
     "/{vendor_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a vendor (admin only)",
-    description="Fails with 409 while people, assets or tickets still refer to it.",
+    description=(
+        "Its technicians are taken off their tickets (a ticket left with nobody"
+        " reopens) and become plain requesters; its asset responsibilities are"
+        " dropped."
+    ),
     dependencies=[Depends(require_roles(Role.admin))],
     responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},
 )
-async def delete_vendor(vendor_id: UUID, pool: PoolDep) -> None:
-    await delete_by_id(pool, "vendor", vendor_id, "Vendor")
+async def delete_vendor(vendor_id: UUID, user: CurrentUserDep, pool: PoolDep) -> None:
+    async with pool.connection() as conn:
+        if not await remove_vendor(conn, vendor_id, user.id):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Vendor not found")

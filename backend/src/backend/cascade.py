@@ -43,3 +43,49 @@ async def release_assignments(
             " changed_by_id) VALUES (%s, %s, 'open', %s)",
             (ticket_id, old_status, actor_id),
         )
+
+
+async def demote_to_requester(
+    conn: AsyncConnection, person_ids: Sequence[UUID]
+) -> None:
+    """Strip staff roles: back to plain requesters, off any ticket they supervise."""
+    ids = list(person_ids)
+    await conn.execute(
+        "UPDATE ticket SET supervisor_id = NULL WHERE supervisor_id = ANY(%s)", (ids,)
+    )
+    await conn.execute(
+        "UPDATE person SET role = 'requester', vendor_id = NULL, department_id = NULL"
+        " WHERE id = ANY(%s)",
+        (ids,),
+    )
+
+
+async def remove_vendor(conn: AsyncConnection, vendor_id: UUID, actor_id: UUID) -> bool:
+    """Delete a vendor; its technicians are unassigned and become requesters.
+
+    Returns False if there is no such vendor.
+    """
+    cur = await conn.execute("SELECT id FROM person WHERE vendor_id = %s", (vendor_id,))
+    technicians = [row[0] for row in await cur.fetchall()]
+    if technicians:
+        await release_assignments(conn, technicians, actor_id)
+        await demote_to_requester(conn, technicians)
+    cur = await conn.execute("DELETE FROM vendor WHERE id = %s", (vendor_id,))
+    return cur.rowcount > 0
+
+
+async def remove_department(conn: AsyncConnection, department_id: UUID) -> bool:
+    """Delete a department, its assets and the supervisor role of its supervisors.
+
+    Tickets on the removed assets keep existing, without an asset. Returns False
+    if there is no such department.
+    """
+    cur = await conn.execute(
+        "SELECT id FROM person WHERE department_id = %s", (department_id,)
+    )
+    supervisors = [row[0] for row in await cur.fetchall()]
+    if supervisors:
+        await demote_to_requester(conn, supervisors)
+    await conn.execute("DELETE FROM asset WHERE department_id = %s", (department_id,))
+    cur = await conn.execute("DELETE FROM department WHERE id = %s", (department_id,))
+    return cur.rowcount > 0
