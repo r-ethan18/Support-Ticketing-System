@@ -29,10 +29,6 @@ jobs:
           - name: frontend
             context: ./frontend
             image: ghcr.io/${{ github.repository }}-frontend
-    outputs:
-      # Each matrix job writes its tag; the update job reads the backend tag
-      # (both jobs always use the same SHA so one tag is enough).
-      image_tag: ${{ steps.meta.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
