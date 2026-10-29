@@ -841,9 +841,9 @@ paths:
       summary: List tickets
       description: 'Results are scoped to the caller: requesters see their own tickets,
 
-        assignees see tickets assigned to them, supervisors see their department''s,
+        assignees see tickets assigned to them, supervisors see their department''s
 
-        admins see all.'
+        (plus tickets with no asset yet), admins see all.'
       operationId: list_tickets
       security:
       - AccessToken: []
@@ -1020,6 +1020,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1070,10 +1076,12 @@ paths:
     patch:
       tags:
       - tickets
-      summary: Update a ticket (supervisor or admin)
-      description: Used by supervisors to set the asset, priority and supervisor,
-        and to move the ticket through its statuses. Every status change is logged
-        in the status history; moving to `closed` sets `closedAt`.
+      summary: Update a ticket
+      description: Supervisors and admins can set the asset, priority and supervisor
+        and move the ticket through its statuses. Requesters can edit the title, description,
+        location and priority of their own `open` ticket, or close it. Every status
+        change is logged in the status history; moving to `closed` sets `closedAt`.
+        A closed ticket can no longer be changed.
       operationId: update_ticket
       security:
       - AccessToken: []
@@ -1098,6 +1106,55 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Ticket'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Resource already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - tickets
+      summary: Delete a ticket (admin only)
+      description: Also removes its assignments, attachments, comments and history.
+      operationId: delete_ticket
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      responses:
+        '204':
+          description: Successful Response
         '401':
           description: Missing or invalid access token
           content:

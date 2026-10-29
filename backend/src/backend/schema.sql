@@ -48,3 +48,46 @@ CREATE TABLE IF NOT EXISTS assignee_category (
     category_id uuid NOT NULL REFERENCES category (id) ON DELETE CASCADE,
     PRIMARY KEY (person_id, category_id)
 );
+
+CREATE TABLE IF NOT EXISTS ticket (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    title         text NOT NULL,
+    description   text NOT NULL,
+    location      text NOT NULL,
+    priority      text NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'critical')),
+    status        text NOT NULL CHECK (status IN ('open', 'assigned', 'in_progress', 'resolved', 'closed')),
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    closed_at     timestamptz,
+    requester_id  uuid NOT NULL REFERENCES person (id),
+    asset_id      uuid REFERENCES asset (id),
+    supervisor_id uuid REFERENCES person (id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS ticket_requester_idx ON ticket (requester_id);
+CREATE INDEX IF NOT EXISTS ticket_asset_idx ON ticket (asset_id);
+CREATE INDEX IF NOT EXISTS ticket_status_idx ON ticket (status);
+
+CREATE TABLE IF NOT EXISTS ticket_status_history (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticket_id     uuid NOT NULL REFERENCES ticket (id) ON DELETE CASCADE,
+    from_status   text,
+    to_status     text NOT NULL,
+    changed_by_id uuid NOT NULL REFERENCES person (id),
+    changed_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ticket_status_history_ticket_idx
+    ON ticket_status_history (ticket_id, changed_at);
+
+CREATE TABLE IF NOT EXISTS ticket_assignment (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticket_id     uuid NOT NULL REFERENCES ticket (id) ON DELETE CASCADE,
+    assignee_id   uuid NOT NULL REFERENCES person (id),
+    assigned_at   timestamptz NOT NULL DEFAULT now(),
+    unassigned_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS ticket_assignment_ticket_idx ON ticket_assignment (ticket_id);
+-- A person is "currently assigned" at most once per ticket.
+CREATE UNIQUE INDEX IF NOT EXISTS ticket_assignment_active_key
+    ON ticket_assignment (ticket_id, assignee_id) WHERE unassigned_at IS NULL;
