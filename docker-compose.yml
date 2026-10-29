@@ -36,6 +36,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.backend.rule=Host(`localhost`) && PathPrefix(`/api`)
       - traefik.http.routers.backend.entrypoints=web
+      - traefik.http.routers.backend.priority=100
       - traefik.http.services.backend.loadbalancer.server.port=8000
 
   frontend:
@@ -55,6 +56,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.frontend.rule=Host(`localhost`)
       - traefik.http.routers.frontend.entrypoints=web
+      - traefik.http.routers.frontend.priority=1
       - traefik.http.services.frontend.loadbalancer.server.port=3000
 
   db:

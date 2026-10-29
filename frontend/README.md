@@ -43,4 +43,4 @@ The `@/*` path alias is configured to resolve to `./src/*` across both Vite (`vi
 The multi-stage `Dockerfile` has been configured for static Single Page Application (SPA) delivery:
 1. **`deps` stage**: Installs project dependencies using `corepack prepare pnpm@12.11.2`.
 2. **`build` stage**: Runs `pnpm run build` (`tsc && vite build`) to generate static assets in `/app/dist`.
-3. **`production` stage**: Uses `nginx:alpine` to serve static assets on port `3000` with fallback routing (`try_files $uri $uri/ /index.html;`) and zero Node.js runtime overhead, perfectly aligned with the Traefik load balancer configuration (`port 3000`).
+3. **`production` stage**: Uses `node:22-alpine` running `pnpm run preview` on port `3000`, cleanly integrating behind the Traefik reverse proxy and load balancer configured in `docker-compose.yml`.
