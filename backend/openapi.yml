@@ -91,6 +91,37 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
       - AccessToken: []
+  /api/v1/auth/password:
+    post:
+      tags:
+      - auth
+      summary: Change the authenticated person's password
+      operationId: change_password
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordChange'
+        required: true
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          description: Current password is wrong, or the new one is unchanged
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - AccessToken: []
   /api/v1/admins:
     post:
       tags:
@@ -2416,6 +2447,22 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    PasswordChange:
+      properties:
+        currentPassword:
+          type: string
+          maxLength: 128
+          title: Currentpassword
+        newPassword:
+          type: string
+          maxLength: 128
+          minLength: 12
+          title: Newpassword
+      type: object
+      required:
+      - currentPassword
+      - newPassword
+      title: PasswordChange
     Person:
       properties:
         id:
