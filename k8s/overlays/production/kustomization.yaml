@@ -1,0 +1,28 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ─── Source ───────────────────────────────────────────────────────────────────
+resources:
+  - ../../base
+
+# ─── Namespace ────────────────────────────────────────────────────────────────
+namespace: sts-prod
+
+# ─── Images ───────────────────────────────────────────────────────────────────
+# Image names match exactly what the existing docker-build-push.yml workflow
+# publishes to GHCR:
+#   ghcr.io/r-ethan18/support-ticketing-system-backend
+#   ghcr.io/r-ethan18/support-ticketing-system-frontend
+#
+# The CI workflow updates these newTag values to the short commit SHA
+# (e.g. sha-abc1234) produced by docker/metadata-action's type=sha tag.
+# The field names are stable so kustomize edit set image / yq / sed can
+# reliably target them.
+images:
+  - name: ghcr.io/r-ethan18/support-ticketing-system-backend
+    newName: ghcr.io/r-ethan18/support-ticketing-system-backend
+    newTag: latest   # replaced by CI with the immutable sha-<commit> tag
+  - name: ghcr.io/r-ethan18/support-ticketing-system-frontend
+    newName: ghcr.io/r-ethan18/support-ticketing-system-frontend
+    newTag: latest   # replaced by CI with the immutable sha-<commit> tag
