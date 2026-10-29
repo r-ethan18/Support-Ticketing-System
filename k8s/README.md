@@ -1,10 +1,15 @@
 # Kubernetes Deployment Guide
 
-Support Ticketing System — production Kubernetes setup using Kustomize, Traefik,
-ArgoCD and External Secrets Operator.
+Support Ticketing System — production Kubernetes setup using Kustomize, Traefik, and ArgoCD.
 
 > **Status**: Manifests implemented; not yet validated against a live cluster.
-> See the [Validation](#validation) section before deploying.
+> See the [Kustomize Validation](#kustomize-validation) section before deploying.
+
+> [!WARNING]
+> **Frontend incomplete**: `frontend/package.json` has no `build` script and no
+> application source. The frontend Docker image **cannot be built yet**.
+> The backend and PostgreSQL can be deployed independently. The frontend
+> Deployment and Service are included in the manifests for when the app is added.
 
 ---
 
@@ -156,15 +161,18 @@ Tags:
 
 ### Manual build (local testing only)
 
+> [!WARNING]
+> The **frontend image cannot currently be built** — `frontend/package.json`
+> has no `build` script and no application source. Build only the backend:
+
 ```bash
+# Backend only (frontend build will fail until app code is added)
 docker build -t sts-backend:local ./backend --target production
-docker build -t sts-frontend:local ./frontend --target production
 ```
 
 For a local cluster (e.g. K3s), import images with:
 ```bash
 docker save sts-backend:local | sudo k3s ctr images import -
-docker save sts-frontend:local | sudo k3s ctr images import -
 ```
 
 ---
