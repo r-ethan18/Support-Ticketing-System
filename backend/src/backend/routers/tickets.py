@@ -1,6 +1,6 @@
 import asyncio
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -274,20 +274,31 @@ async def update_ticket(
         raise HTTPException(
             http.HTTP_422_UNPROCESSABLE_CONTENT, detail="Unknown assetId"
         ) from None
-    # Notify SSE subscribers if status changed.
     if new_status and new_status is not ticket.status:
-        await hub.publish(
-            ticket_id,
-            {
-                "event": "status",
-                "data": {
-                    "ticketId": str(ticket_id),
-                    "status": new_status.value,
-                    "changedAt": datetime.now(UTC).isoformat(),
-                },
-            },
-        )
+        await _publish_status(hub, ticket_id, new_status)
     return updated
+
+
+async def _publish_status(
+    hub: PubSubHub, ticket_id: UUID, status: TicketStatus
+) -> None:
+    await hub.publish(
+        ticket_id,
+        {
+            "event": "status",
+            "data": {
+                "ticketId": str(ticket_id),
+                "status": status.value,
+                "changedAt": datetime.now(UTC).isoformat(),
+            },
+        },
+    )
+
+
+async def _publish_assignments_changed(hub: PubSubHub, ticket_id: UUID) -> None:
+    await hub.publish(
+        ticket_id, {"event": "assignment", "data": {"ticketId": str(ticket_id)}}
+    )
 
 
 @router.delete(
@@ -298,11 +309,14 @@ async def update_ticket(
     dependencies=[Depends(require_roles(Role.admin))],
     responses={**NOT_FOUND, **FORBIDDEN},
 )
-async def delete_ticket(ticket_id: UUID, pool: PoolDep) -> None:
+async def delete_ticket(ticket_id: UUID, pool: PoolDep, hub: HubDep) -> None:
     async with pool.connection() as conn:
         cur = await conn.execute("DELETE FROM ticket WHERE id = %s", (ticket_id,))
         if cur.rowcount == 0:
             raise HTTPException(http.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    await hub.publish(
+        ticket_id, {"event": "deleted", "data": {"ticketId": str(ticket_id)}}
+    )
 
 
 ASSIGNMENT_COLUMNS = "id, ticket_id, assignee_id, assigned_at, unassigned_at"
@@ -343,7 +357,11 @@ async def list_ticket_assignments(
     responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},
 )
 async def create_ticket_assignment(
-    ticket_id: UUID, body: TicketAssignmentCreate, user: CurrentUserDep, pool: PoolDep
+    ticket_id: UUID,
+    body: TicketAssignmentCreate,
+    user: CurrentUserDep,
+    pool: PoolDep,
+    hub: HubDep,
 ) -> TicketAssignment:
     ticket = await get_visible_ticket(pool, ticket_id, user)
     if ticket.status is TicketStatus.closed:
@@ -387,6 +405,9 @@ async def create_ticket_assignment(
             await _set_status(
                 conn, ticket_id, TicketStatus.open, TicketStatus.assigned, user.id
             )
+    await _publish_assignments_changed(hub, ticket_id)
+    if ticket.status is TicketStatus.open:
+        await _publish_status(hub, ticket_id, TicketStatus.assigned)
     return assignment
 
 
@@ -419,7 +440,11 @@ async def _set_status(
     responses={**NOT_FOUND, **FORBIDDEN},
 )
 async def delete_ticket_assignment(
-    ticket_id: UUID, assignment_id: UUID, user: CurrentUserDep, pool: PoolDep
+    ticket_id: UUID,
+    assignment_id: UUID,
+    user: CurrentUserDep,
+    pool: PoolDep,
+    hub: HubDep,
 ) -> None:
     ticket = await get_visible_ticket(pool, ticket_id, user)
     async with pool.connection() as conn:
@@ -437,10 +462,14 @@ async def delete_ticket_assignment(
             " WHERE ticket_id = %s AND unassigned_at IS NULL LIMIT 1",
             (ticket_id,),
         )
-        if ticket.status is TicketStatus.assigned and not await cur.fetchone():
+        reopened = ticket.status is TicketStatus.assigned and not await cur.fetchone()
+        if reopened:
             await _set_status(
                 conn, ticket_id, TicketStatus.assigned, TicketStatus.open, user.id
             )
+    await _publish_assignments_changed(hub, ticket_id)
+    if reopened:
+        await _publish_status(hub, ticket_id, TicketStatus.open)
 
 
 @router.get(
@@ -610,9 +639,15 @@ async def list_ticket_status_history(
 async def _sse_generator(
     ticket_id: UUID,
     hub: PubSubHub,
-    heartbeat_secs: int = 25,
+    still_visible: Callable[[], Awaitable[bool]],
+    heartbeat_secs: float = 25,
 ) -> AsyncGenerator[str]:
-    """Yield SSE-formatted text chunks until the client disconnects."""
+    """Yield SSE-formatted text chunks until the client disconnects.
+
+    Access was checked when the stream opened; it is checked again at every
+    heartbeat, so the stream ends (`closed`) once the ticket is deleted or the
+    caller can no longer see it (unassigned, demoted, account deleted).
+    """
     q = hub.subscribe(ticket_id)
     try:
         # Send an initial 'connected' ping so the browser EventSource doesn't
@@ -621,12 +656,18 @@ async def _sse_generator(
         while True:
             try:
                 event = await asyncio.wait_for(q.get(), timeout=heartbeat_secs)
-                payload = json.dumps(event["data"])
-                yield f"event: {event['event']}\ndata: {payload}\n\n"
             except TimeoutError:
+                if not await still_visible():
+                    yield "event: closed\ndata: {}\n\n"
+                    return
                 # Keep the connection alive; browsers expect at least one byte
                 # every ~30 s or they may time out.
                 yield ": heartbeat\n\n"
+                continue
+            payload = json.dumps(event["data"])
+            yield f"event: {event['event']}\ndata: {payload}\n\n"
+            if event["event"] == "deleted":
+                return
     finally:
         hub.unsubscribe(ticket_id, q)
 
@@ -638,8 +679,12 @@ async def _sse_generator(
         "Server-Sent Events endpoint. Connect with `EventSource` (with an"
         " Authorization header via a custom fetch). Emits `comment` events when"
         " a new comment is posted and `status` events when the ticket status"
-        " changes. A `connected` event is sent immediately on connection, and"
-        " a `: heartbeat` comment every 25 s keeps the connection alive."
+        " changes, `assignment` events when assignees change, `resync` when the"
+        " client fell behind and should reload, and `deleted`/`closed` just before"
+        " the server ends the stream (ticket deleted, or the caller lost access)."
+        " A `connected` event is sent immediately on connection, and a"
+        " `: heartbeat` comment every 25 s keeps the connection alive; access is"
+        " re-checked at each heartbeat."
     ),
     response_class=StreamingResponse,
     responses=NOT_FOUND,
@@ -650,8 +695,16 @@ async def stream_ticket(
     """Long-lived SSE connection scoped to a single ticket."""
     # Enforce visibility: 404 / 403 as usual.
     await get_visible_ticket(pool, ticket_id, user)
+
+    async def still_visible() -> bool:
+        try:
+            await get_visible_ticket(pool, ticket_id, user)
+        except HTTPException:
+            return False
+        return True
+
     return StreamingResponse(
-        _sse_generator(ticket_id, hub),
+        _sse_generator(ticket_id, hub, still_visible),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
