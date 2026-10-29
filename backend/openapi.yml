@@ -45,6 +45,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/refresh:
+    post:
+      tags:
+      - auth
+      summary: Exchange a refresh token for a new token pair
+      description: 'Refresh tokens are single-use: the response carries a replacement.
+        The new access token has the person''s *current* role. Sending a token that
+        was already used revokes that whole session.'
+      operationId: refresh_access_token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/logout:
+    post:
+      tags:
+      - auth
+      summary: Revoke a refresh token's session
+      description: Idempotent. Access tokens already issued stay valid until they
+        expire.
+      operationId: logout
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+        required: true
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/auth/register:
     post:
       tags:
@@ -103,6 +160,8 @@ paths:
       tags:
       - auth
       summary: Change the authenticated person's password
+      description: Revokes all of the person's refresh tokens, so other devices must
+        log in again.
       operationId: change_password
       requestBody:
         content:
@@ -2532,6 +2591,16 @@ components:
       - limit
       - offset
       title: PersonPage
+    RefreshRequest:
+      properties:
+        refreshToken:
+          type: string
+          maxLength: 256
+          title: Refreshtoken
+      type: object
+      required:
+      - refreshToken
+      title: RefreshRequest
     RegisterRequest:
       properties:
         name:
@@ -2936,6 +3005,10 @@ components:
         accessToken:
           type: string
           title: Accesstoken
+        refreshToken:
+          type: string
+          title: Refreshtoken
+          description: Single-use; exchange at `POST /auth/refresh` for a new pair
         tokenType:
           type: string
           title: Tokentype
@@ -2947,6 +3020,7 @@ components:
       type: object
       required:
       - accessToken
+      - refreshToken
       - expiresIn
       title: TokenResponse
     ValidationError:
