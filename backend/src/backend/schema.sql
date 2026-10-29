@@ -129,3 +129,19 @@ CREATE TABLE IF NOT EXISTS login_throttle (
     window_started_at timestamptz NOT NULL,
     locked_until      timestamptz
 );
+
+-- Opaque refresh tokens (only the SHA-256 of the token is stored). Each refresh
+-- retires the presented token and issues a successor in the same family; a
+-- retired token turning up again means theft, so the whole family is revoked.
+CREATE TABLE IF NOT EXISTS refresh_token (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    family_id  uuid NOT NULL,
+    person_id  uuid NOT NULL REFERENCES person (id) ON DELETE CASCADE,
+    token_hash text NOT NULL UNIQUE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    revoked_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS refresh_token_person_idx ON refresh_token (person_id);
+CREATE INDEX IF NOT EXISTS refresh_token_family_idx ON refresh_token (family_id);

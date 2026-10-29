@@ -29,7 +29,8 @@ class DatabaseSettings:
 @dataclass(frozen=True)
 class Settings:
     jwt_secret: str
-    access_token_ttl_seconds: int = 3600
+    access_token_ttl_seconds: int = 900
+    refresh_token_ttl_seconds: int = 30 * 24 * 3600
     database: DatabaseSettings = DatabaseSettings()
     # Only used to create the first admin when none exists.
     admin_email: str = ""
@@ -54,8 +55,9 @@ def get_settings() -> Settings:
         )
     return Settings(
         jwt_secret=secret,
-        access_token_ttl_seconds=int(
-            os.environ.get("ACCESS_TOKEN_TTL_SECONDS", "3600")
+        access_token_ttl_seconds=int(os.environ.get("ACCESS_TOKEN_TTL_SECONDS", "900")),
+        refresh_token_ttl_seconds=int(
+            os.environ.get("REFRESH_TOKEN_TTL_SECONDS", str(30 * 24 * 3600))
         ),
         database=DatabaseSettings(
             host=os.environ.get("DB_HOST", "localhost"),
