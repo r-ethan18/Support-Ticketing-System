@@ -43,12 +43,10 @@ const KEYS = {
 
 export const isMockMode = (): boolean => {
 	try {
-		const stored = localStorage.getItem(KEYS.MOCK_MODE);
-		// Default to true so app works out of the box with rich data,
-		// but user can toggle to Live Backend Mode at any time!
-		return stored === null ? true : stored === "true";
+		// Mock mode defaults to false: Real API is primary in production/integration
+		return localStorage.getItem(KEYS.MOCK_MODE) === "true";
 	} catch {
-		return true;
+		return false;
 	}
 };
 
@@ -121,12 +119,13 @@ export const ticketService = {
 		if (!isMockMode()) {
 			return await apiRequest<PageResponse<Ticket>>("/tickets", {
 				params: {
-					status: filters.status?.join(","),
-					priority: filters.priority?.join(","),
+					status: filters.status,
+					priority: filters.priority,
 					requesterId: filters.requesterId,
 					assigneeId: filters.assigneeId,
 					supervisorId: filters.supervisorId,
 					departmentId: filters.departmentId,
+					assetId: filters.assetId,
 					q: filters.q,
 					limit: filters.limit ?? 25,
 					offset: filters.offset ?? 0,
@@ -226,9 +225,15 @@ export const ticketService = {
 		assetId?: string,
 	): Promise<Ticket> {
 		if (!isMockMode()) {
+			// Backend TicketCreate takes title, description, location, priority
 			return await apiRequest<Ticket>("/tickets", {
 				method: "POST",
-				body: JSON.stringify(body),
+				body: JSON.stringify({
+					title: body.title,
+					description: body.description,
+					location: body.location,
+					priority: body.priority || "medium",
+				}),
 			});
 		}
 
@@ -275,9 +280,20 @@ export const ticketService = {
 		callerId: string,
 	): Promise<Ticket> {
 		if (!isMockMode()) {
+			const payload: Record<string, unknown> = {};
+			if (update.title !== undefined) payload.title = update.title;
+			if (update.description !== undefined)
+				payload.description = update.description;
+			if (update.location !== undefined) payload.location = update.location;
+			if (update.priority !== undefined) payload.priority = update.priority;
+			if (update.status !== undefined) payload.status = update.status;
+			if (update.assetId !== undefined) payload.assetId = update.assetId;
+			if (update.supervisorId !== undefined)
+				payload.supervisorId = update.supervisorId;
+
 			return await apiRequest<Ticket>(`/tickets/${ticketId}`, {
 				method: "PATCH",
-				body: JSON.stringify(update),
+				body: JSON.stringify(payload),
 			});
 		}
 
@@ -301,7 +317,7 @@ export const ticketService = {
 					? update.supervisorId
 					: current.supervisorId,
 			closedAt:
-				update.status === "closed" || update.status === "resolved"
+				update.status === "closed"
 					? new Date().toISOString()
 					: update.status
 						? null
@@ -329,6 +345,18 @@ export const ticketService = {
 		return updated;
 	},
 
+	async deleteTicket(ticketId: string): Promise<void> {
+		if (!isMockMode()) {
+			await apiRequest<void>(`/tickets/${ticketId}`, {
+				method: "DELETE",
+			});
+			return;
+		}
+		let tickets = getStore<Ticket>(KEYS.TICKETS, INITIAL_TICKETS);
+		tickets = tickets.filter((t) => t.id !== ticketId);
+		setStore(KEYS.TICKETS, tickets);
+	},
+
 	async assignTicket(
 		ticketId: string,
 		assigneeId: string,
@@ -350,7 +378,6 @@ export const ticketService = {
 		);
 		const now = new Date().toISOString();
 
-		// Mark any existing active assignments as unassigned
 		for (const a of assignments) {
 			if (a.ticketId === ticketId && !a.unassignedAt) {
 				a.unassignedAt = now;
@@ -367,7 +394,6 @@ export const ticketService = {
 		assignments.push(newAssignment);
 		setStore(KEYS.ASSIGNMENTS, assignments);
 
-		// Also update ticket status to "assigned" if currently open
 		const tickets = getStore<Ticket>(KEYS.TICKETS, INITIAL_TICKETS);
 		const ticket = tickets.find((t) => t.id === ticketId);
 		if (ticket && ticket.status === "open") {
@@ -377,6 +403,30 @@ export const ticketService = {
 		}
 
 		return newAssignment;
+	},
+
+	async deleteAssignment(
+		ticketId: string,
+		assignmentId: string,
+	): Promise<void> {
+		if (!isMockMode()) {
+			await apiRequest<void>(
+				`/tickets/${ticketId}/assignments/${assignmentId}`,
+				{
+					method: "DELETE",
+				},
+			);
+			return;
+		}
+		const assignments = getStore<TicketAssignment>(
+			KEYS.ASSIGNMENTS,
+			INITIAL_ASSIGNMENTS,
+		);
+		const match = assignments.find((a) => a.id === assignmentId);
+		if (match) {
+			match.unassignedAt = new Date().toISOString();
+			setStore(KEYS.ASSIGNMENTS, assignments);
+		}
 	},
 
 	async listAssignments(ticketId: string): Promise<TicketAssignment[]> {
@@ -430,17 +480,25 @@ export const ticketService = {
 		return newComment;
 	},
 
-	async listAttachments(ticketId: string): Promise<TicketAttachment[]> {
+	async listAttachments(
+		ticketId: string,
+		kind?: "issue_evidence" | "completion_proof",
+	): Promise<TicketAttachment[]> {
 		if (!isMockMode()) {
 			return await apiRequest<TicketAttachment[]>(
 				`/tickets/${ticketId}/attachments`,
+				{
+					params: kind ? { kind } : undefined,
+				},
 			);
 		}
 		const attachments = getStore<TicketAttachment>(
 			KEYS.ATTACHMENTS,
 			INITIAL_ATTACHMENTS,
 		);
-		return attachments.filter((a) => a.ticketId === ticketId);
+		return attachments.filter(
+			(a) => a.ticketId === ticketId && (!kind || a.kind === kind),
+		);
 	},
 
 	async addAttachment(
@@ -496,43 +554,103 @@ export const ticketService = {
 			);
 	},
 
-	async listPeople(): Promise<Person[]> {
+	async listPeople(filters?: {
+		role?: Role;
+		vendorId?: string;
+		departmentId?: string;
+		q?: string;
+		limit?: number;
+		offset?: number;
+	}): Promise<Person[]> {
 		if (!isMockMode()) {
-			const res = await apiRequest<PageResponse<Person>>("/people");
-			return res.items;
+			try {
+				const res = await apiRequest<PageResponse<Person>>("/people", {
+					params: filters,
+				});
+				return res.items;
+			} catch (_err) {
+				// Requesters are 403 on list_people per API spec; gracefully return empty
+				return [];
+			}
 		}
-		return getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		let people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		if (filters?.role) {
+			people = people.filter((p) => p.role === filters.role);
+		}
+		if (filters?.q) {
+			const q = filters.q.toLowerCase();
+			people = people.filter(
+				(p) =>
+					p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q),
+			);
+		}
+		return people;
+	},
+
+	async getPerson(personId: string): Promise<Person> {
+		if (!isMockMode()) {
+			return await apiRequest<Person>(`/people/${personId}`);
+		}
+		const people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		const found = people.find((p) => p.id === personId);
+		if (!found) throw new Error("Person not found");
+		return found;
 	},
 
 	async listDepartments(): Promise<Department[]> {
 		if (!isMockMode()) {
-			const res = await apiRequest<PageResponse<Department>>("/departments");
-			return res.items;
+			try {
+				const res = await apiRequest<PageResponse<Department>>("/departments");
+				return res.items;
+			} catch {
+				return INITIAL_DEPARTMENTS;
+			}
 		}
 		return INITIAL_DEPARTMENTS;
 	},
 
 	async listCategories(): Promise<Category[]> {
 		if (!isMockMode()) {
-			const res = await apiRequest<PageResponse<Category>>("/categories");
-			return res.items;
+			try {
+				const res = await apiRequest<PageResponse<Category>>("/categories");
+				return res.items;
+			} catch {
+				return INITIAL_CATEGORIES;
+			}
 		}
 		return INITIAL_CATEGORIES;
 	},
 
 	async listVendors(): Promise<Vendor[]> {
 		if (!isMockMode()) {
-			const res = await apiRequest<PageResponse<Vendor>>("/vendors");
-			return res.items;
+			try {
+				const res = await apiRequest<PageResponse<Vendor>>("/vendors");
+				return res.items;
+			} catch {
+				return INITIAL_VENDORS;
+			}
 		}
 		return INITIAL_VENDORS;
 	},
 
 	async listAssets(): Promise<Asset[]> {
 		if (!isMockMode()) {
-			const res = await apiRequest<PageResponse<Asset>>("/assets");
-			return res.items;
+			try {
+				const res = await apiRequest<PageResponse<Asset>>("/assets");
+				return res.items;
+			} catch {
+				return INITIAL_ASSETS;
+			}
 		}
 		return INITIAL_ASSETS;
+	},
+
+	async getAsset(assetId: string): Promise<Asset> {
+		if (!isMockMode()) {
+			return await apiRequest<Asset>(`/assets/${assetId}`);
+		}
+		const found = INITIAL_ASSETS.find((a) => a.id === assetId);
+		if (!found) throw new Error("Asset not found");
+		return found;
 	},
 };

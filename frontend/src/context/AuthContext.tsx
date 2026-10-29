@@ -18,8 +18,9 @@ interface AuthContextType {
 	user: Person | null;
 	role: Role;
 	isAuthenticated: boolean;
+	loading: boolean;
 	mockMode: boolean;
-	login: (email: string, pass: string) => Promise<void>;
+	login: (email: string, pass: string) => Promise<Person>;
 	logout: () => void;
 	switchRole: (role: Role) => void;
 	toggleMockMode: (enabled: boolean) => void;
@@ -32,19 +33,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	const [user, setUser] = useState<Person | null>(() =>
 		authService.getCurrentUser(),
 	);
+	const [loading, setLoading] = useState<boolean>(true);
 	const [mockMode, setMockModeState] = useState<boolean>(() => isMockMode());
 
 	useEffect(() => {
-		// If in mock mode and no user is logged in, default to the requester persona
-		if (mockMode && !user) {
-			const initial = authService.switchPersona("requester");
-			setUser(initial);
-		}
-	}, [mockMode, user]);
+		let isMounted = true;
+		// Verify and restore authenticated session against GET /api/v1/auth/me
+		authService
+			.restoreSession()
+			.then((restored) => {
+				if (isMounted) {
+					setUser(restored);
+					setLoading(false);
+				}
+			})
+			.catch(() => {
+				if (isMounted) {
+					setLoading(false);
+				}
+			});
+
+		return () => {
+			isMounted = false;
+		};
+	}, []);
 
 	const login = useCallback(async (email: string, pass: string) => {
 		const result = await authService.login(email, pass);
 		setUser(result.person);
+		return result.person;
 	}, []);
 
 	const logout = useCallback(() => {
@@ -60,6 +77,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	const toggleMockMode = useCallback((enabled: boolean) => {
 		persistMockMode(enabled);
 		setMockModeState(enabled);
+		if (enabled) {
+			const persona = authService.switchPersona("requester");
+			setUser(persona);
+		} else {
+			// When switching to live mode, verify current token or logout
+			authService.restoreSession().then((u) => setUser(u));
+		}
 	}, []);
 
 	const resetDemoData = useCallback(() => {
@@ -72,6 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				user,
 				role: user?.role || "requester",
 				isAuthenticated: Boolean(user),
+				loading,
 				mockMode,
 				login,
 				logout,

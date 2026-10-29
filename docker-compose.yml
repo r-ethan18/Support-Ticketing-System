@@ -32,6 +32,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    ports:
+      - "8000:8000"
     networks:
       - sts-network
     labels:
@@ -75,6 +77,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    ports:
+      - "5433:5432"
     networks:
       - sts-network
 

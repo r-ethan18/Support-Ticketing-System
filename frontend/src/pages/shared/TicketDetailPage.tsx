@@ -244,7 +244,10 @@ export function TicketDetailPage() {
 			setCommentBody("");
 			showToast("Comment posted to conversation", "success");
 		} catch (_err) {
-			showToast("Failed to post comment", "error");
+			showToast(
+				_err instanceof Error ? _err.message : "Failed to post comment",
+				"error",
+			);
 		} finally {
 			setSubmittingComment(false);
 		}
@@ -266,7 +269,10 @@ export function TicketDetailPage() {
 			}
 			showToast(`Status updated to ${newStatus.toUpperCase()}`, "success");
 		} catch (_err) {
-			showToast("Failed to update status", "error");
+			showToast(
+				_err instanceof Error ? _err.message : "Failed to update status",
+				"error",
+			);
 		} finally {
 			setUpdatingStatus(false);
 		}
@@ -290,7 +296,10 @@ export function TicketDetailPage() {
 			setAssignModalOpen(false);
 			showToast("Technician assigned to ticket", "success");
 		} catch (_err) {
-			showToast("Failed to assign ticket", "error");
+			showToast(
+				_err instanceof Error ? _err.message : "Failed to assign ticket",
+				"error",
+			);
 		} finally {
 			setAssigning(false);
 		}
@@ -313,7 +322,10 @@ export function TicketDetailPage() {
 			setAttachModalOpen(false);
 			showToast("Attachment uploaded successfully", "success");
 		} catch (_err) {
-			showToast("Failed to add attachment", "error");
+			showToast(
+				_err instanceof Error ? _err.message : "Failed to add attachment",
+				"error",
+			);
 		} finally {
 			setAttaching(false);
 		}
@@ -668,31 +680,33 @@ export function TicketDetailPage() {
 							{/* Assignee Actions */}
 							{role === "assignee" && (
 								<div className="flex flex-col gap-2">
-									{ticket.status === "assigned" && (
-										<Button
-											variant="primary"
-											className="w-full"
-											isLoading={updatingStatus}
-											onClick={() => handleUpdateStatus("in_progress")}
-										>
-											Start Work (In Progress)
-										</Button>
-									)}
-									{ticket.status === "in_progress" && (
-										<Button
-											variant="primary"
-											className="w-full bg-emerald"
-											isLoading={updatingStatus}
-											onClick={() => handleUpdateStatus("resolved")}
-										>
-											Mark as Resolved
-										</Button>
-									)}
-									{ticket.status === "resolved" && (
-										<span className="text-center text-xs text-emerald py-2">
-											✓ Resolution logged. Pending requester close.
-										</span>
-									)}
+									<Button
+										variant="primary"
+										className="w-full bg-emerald"
+										onClick={() => {
+											setAttachKind("completion_proof");
+											setAttachModalOpen(true);
+										}}
+									>
+										Upload Completion Proof
+									</Button>
+									<Button
+										variant="secondary"
+										className="w-full"
+										onClick={() => {
+											setActiveTab("conversation");
+											const commentInput = document.getElementById(
+												"ticket-reply-textarea",
+											);
+											if (commentInput) commentInput.focus();
+										}}
+									>
+										Post Progress Update
+									</Button>
+									<p className="text-xs text-secondary text-center mt-1">
+										Assignees submit completion proof and chat updates for
+										supervisor sign-off.
+									</p>
 								</div>
 							)}
 

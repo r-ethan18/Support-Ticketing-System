@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
+import { DEMO_CREDENTIALS } from "../../services/authService";
 import type { Role } from "../../types/api";
 import { Avatar } from "../common/Avatar";
 import { RoleBadge } from "../common/Badge";
@@ -19,6 +20,7 @@ export function TopNavbar({
 	const {
 		user,
 		role,
+		login,
 		switchRole,
 		logout,
 		mockMode,
@@ -29,25 +31,41 @@ export function TopNavbar({
 	const navigate = useNavigate();
 	const [roleMenuOpen, setRoleMenuOpen] = useState(false);
 
-	const handleRoleSwitch = (newRole: Role) => {
-		switchRole(newRole);
+	const handleRoleSwitch = async (newRole: Role) => {
 		setRoleMenuOpen(false);
-		showToast(`Switched workspace to ${newRole.toUpperCase()}`, "info");
+		try {
+			if (!mockMode) {
+				const cred = DEMO_CREDENTIALS[newRole];
+				await login(cred.email, cred.password);
+				showToast(
+					`Switched and authenticated as ${cred.name} (${newRole.toUpperCase()})`,
+					"success",
+				);
+			} else {
+				switchRole(newRole);
+				showToast(`Switched mock persona to ${newRole.toUpperCase()}`, "info");
+			}
 
-		// Route to appropriate default landing for role
-		switch (newRole) {
-			case "requester":
-				navigate("/requester/dashboard");
-				break;
-			case "assignee":
-				navigate("/assignee/tickets");
-				break;
-			case "supervisor":
-				navigate("/supervisor/dashboard");
-				break;
-			case "admin":
-				navigate("/admin/dashboard");
-				break;
+			// Route to appropriate default landing for role
+			switch (newRole) {
+				case "requester":
+					navigate("/requester/dashboard");
+					break;
+				case "assignee":
+					navigate("/assignee/tickets");
+					break;
+				case "supervisor":
+					navigate("/supervisor/dashboard");
+					break;
+				case "admin":
+					navigate("/admin/dashboard");
+					break;
+			}
+		} catch (err) {
+			showToast(
+				err instanceof Error ? err.message : "Failed to switch role",
+				"error",
+			);
 		}
 	};
 
@@ -133,7 +151,7 @@ export function TopNavbar({
 								onClick={() => handleRoleSwitch("requester")}
 							>
 								<div className="item-title">Requester</div>
-								<div className="item-sub">Jane Doe (Employee)</div>
+								<div className="item-sub">Alice Chen (Service Requester)</div>
 							</button>
 							<button
 								type="button"
@@ -141,7 +159,7 @@ export function TopNavbar({
 								onClick={() => handleRoleSwitch("assignee")}
 							>
 								<div className="item-title">Assignee</div>
-								<div className="item-sub">Alex Rivera (Field Tech)</div>
+								<div className="item-sub">Carlos Mendoza (Field Tech)</div>
 							</button>
 							<button
 								type="button"
@@ -149,7 +167,7 @@ export function TopNavbar({
 								onClick={() => handleRoleSwitch("supervisor")}
 							>
 								<div className="item-title">Supervisor</div>
-								<div className="item-sub">Sarah Chen (Dept Lead)</div>
+								<div className="item-sub">David Miller (Facilities Lead)</div>
 							</button>
 							<button
 								type="button"
@@ -157,7 +175,7 @@ export function TopNavbar({
 								onClick={() => handleRoleSwitch("admin")}
 							>
 								<div className="item-title">Administrator</div>
-								<div className="item-sub">Marcus Vance (Ops Admin)</div>
+								<div className="item-sub">Administrator (System Admin)</div>
 							</button>
 						</div>
 					)}

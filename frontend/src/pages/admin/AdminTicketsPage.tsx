@@ -72,8 +72,43 @@ export function AdminTicketsPage() {
 	const totalPages = Math.ceil(total / limit) || 1;
 
 	const handleExport = () => {
+		if (tickets.length === 0) {
+			showToast("No tickets available to export", "info");
+			return;
+		}
+		const headers = [
+			"ID",
+			"Title",
+			"Location",
+			"Priority",
+			"Status",
+			"Created At",
+			"Closed At",
+		];
+		const rows = tickets.map((t) => [
+			t.id,
+			`"${t.title.replace(/"/g, '""')}"`,
+			`"${t.location.replace(/"/g, '""')}"`,
+			t.priority,
+			t.status,
+			t.createdAt,
+			t.closedAt || "",
+		]);
+		const csvContent = [
+			headers.join(","),
+			...rows.map((r) => r.join(",")),
+		].join("\n");
+		const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.setAttribute("href", url);
+		link.setAttribute("download", `sts-tickets-audit-${Date.now()}.csv`);
+		document.body.appendChild(link);
+		link.click();
+		document.body.removeChild(link);
+		URL.revokeObjectURL(url);
 		showToast(
-			`Exported ${total} ticket audit records to CSV report format`,
+			`Exported ${tickets.length} tickets to CSV audit file`,
 			"success",
 		);
 	};

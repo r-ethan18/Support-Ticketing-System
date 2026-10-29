@@ -9,6 +9,7 @@ import { Modal } from "../../components/common/Modal";
 import { Select } from "../../components/common/Select";
 import { TableSkeleton } from "../../components/common/Skeleton";
 import { useToast } from "../../context/ToastContext";
+import { apiRequest } from "../../services/apiClient";
 import { ticketService } from "../../services/ticketService";
 import type { Department, Person, Role, Vendor } from "../../types/api";
 
@@ -55,28 +56,86 @@ export function UserManagementPage() {
 		loadData();
 	}, []);
 
-	const handleAddUser = (e: FormEvent) => {
+	const handleAddUser = async (e: FormEvent) => {
 		e.preventDefault();
 		if (!newName.trim() || !newEmail.trim()) return;
 
 		setCreatingUser(true);
-		const newPerson: Person = {
-			id: `p-${Date.now()}`,
-			name: newName.trim(),
-			email: newEmail.trim(),
-			phone: newPhone.trim() || "+1 (555) 000-0000",
-			role: newRole,
-			departmentId: newDeptId || null,
-			vendorId: newVendorId || null,
-		};
+		try {
+			if (
+				ticketService.listPeople &&
+				localStorage.getItem("sts_use_mock_mode") !== "true"
+			) {
+				const tempPassword = "TempPassword123!";
+				if (newRole === "admin") {
+					await ticketService.listPeople(); // verification
+					// Admin creation via POST /admins
+					await apiRequest("/admins", {
+						method: "POST",
+						body: JSON.stringify({
+							name: newName.trim(),
+							email: newEmail.trim(),
+							phone: newPhone.trim() || "+1-555-0000",
+							password: tempPassword,
+						}),
+					});
+				} else {
+					const reg = await apiRequest<Person>("/auth/register", {
+						method: "POST",
+						body: JSON.stringify({
+							name: newName.trim(),
+							email: newEmail.trim(),
+							phone: newPhone.trim() || "+1-555-0000",
+							password: tempPassword,
+						}),
+					});
 
-		setPeople((prev) => [newPerson, ...prev]);
-		setAddUserModalOpen(false);
-		setNewName("");
-		setNewEmail("");
-		setNewPhone("");
-		setCreatingUser(false);
-		showToast(`Created new ${newRole} account for ${newName}`, "success");
+					if (newRole !== "requester") {
+						await apiRequest(`/people/${reg.id}/role`, {
+							method: "PUT",
+							body: JSON.stringify({
+								role: newRole,
+								departmentId:
+									newRole === "supervisor"
+										? newDeptId || departments[0]?.id || null
+										: null,
+								vendorId:
+									newRole === "assignee"
+										? newVendorId || vendors[0]?.id || null
+										: null,
+							}),
+						});
+					}
+				}
+
+				const refreshed = await ticketService.listPeople();
+				setPeople(refreshed);
+			} else {
+				const newPerson: Person = {
+					id: `p-${Date.now()}`,
+					name: newName.trim(),
+					email: newEmail.trim(),
+					phone: newPhone.trim() || "+1 (555) 000-0000",
+					role: newRole,
+					departmentId: newDeptId || null,
+					vendorId: newVendorId || null,
+				};
+				setPeople((prev) => [newPerson, ...prev]);
+			}
+
+			setAddUserModalOpen(false);
+			setNewName("");
+			setNewEmail("");
+			setNewPhone("");
+			showToast(`Created new ${newRole} account for ${newName}`, "success");
+		} catch (err) {
+			showToast(
+				err instanceof Error ? err.message : "Failed to create user",
+				"error",
+			);
+		} finally {
+			setCreatingUser(false);
+		}
 	};
 
 	const filteredPeople = people.filter((p) => {
