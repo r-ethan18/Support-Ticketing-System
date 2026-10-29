@@ -19,7 +19,8 @@ import type { Ticket } from "../../types/api";
 export function RequesterDashboard() {
 	const { user } = useAuth();
 	const navigate = useNavigate();
-	const [tickets, setTickets] = useState<Ticket[]>([]);
+	const [allTickets, setAllTickets] = useState<Ticket[]>([]);
+	const [totalCount, setTotalCount] = useState<number>(0);
 	const [loading, setLoading] = useState(true);
 
 	useEffect(() => {
@@ -29,11 +30,12 @@ export function RequesterDashboard() {
 				const res = await ticketService.listTickets({
 					callerRole: "requester",
 					callerId: user?.id,
-					limit: 5,
+					limit: 50,
 					sortBy: "createdAt",
 					order: "desc",
 				});
-				setTickets(res.items);
+				setAllTickets(res.items);
+				setTotalCount(res.total);
 			} catch (err) {
 				console.error("Failed to load requester dashboard tickets", err);
 			} finally {
@@ -43,14 +45,15 @@ export function RequesterDashboard() {
 		loadDashboardTickets();
 	}, [user?.id]);
 
-	const totalTickets = tickets.length;
-	const openTickets = tickets.filter(
+	const recentTickets = allTickets.slice(0, 5);
+	const totalTickets = totalCount || allTickets.length;
+	const openTickets = allTickets.filter(
 		(t) => t.status === "open" || t.status === "assigned",
 	).length;
-	const inProgressTickets = tickets.filter(
+	const inProgressTickets = allTickets.filter(
 		(t) => t.status === "in_progress",
 	).length;
-	const resolvedTickets = tickets.filter(
+	const resolvedTickets = allTickets.filter(
 		(t) => t.status === "resolved" || t.status === "closed",
 	).length;
 
@@ -147,7 +150,7 @@ export function RequesterDashboard() {
 
 				{loading ? (
 					<TableSkeleton rows={3} cols={5} />
-				) : tickets.length === 0 ? (
+				) : recentTickets.length === 0 ? (
 					<EmptyState
 						title="No tickets submitted yet"
 						description="When you encounter an equipment or facility issue, report it here."
@@ -176,7 +179,7 @@ export function RequesterDashboard() {
 								</tr>
 							</thead>
 							<tbody>
-								{tickets.map((ticket) => (
+								{recentTickets.map((ticket) => (
 									<tr
 										key={ticket.id}
 										className="clickable-row"

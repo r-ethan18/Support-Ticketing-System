@@ -23,6 +23,18 @@ export class ApiError extends Error {
 	get isForbidden(): boolean {
 		return this.status === 403;
 	}
+
+	get isNotFound(): boolean {
+		return this.status === 404;
+	}
+
+	get isConflict(): boolean {
+		return this.status === 409;
+	}
+
+	get isValidationError(): boolean {
+		return this.status === 422;
+	}
 }
 
 const TOKEN_KEY = "sts_auth_token";
@@ -51,21 +63,45 @@ export const removeStoredToken = (): void => {
 	}
 };
 
-interface RequestOptions extends RequestInit {
-	params?: Record<string, string | number | boolean | null | undefined>;
+export interface RequestOptions extends RequestInit {
+	params?: Record<
+		string,
+		string | number | boolean | null | undefined | (string | number)[]
+	>;
 }
+
+export const getApiBaseUrl = (): string => {
+	const envUrl =
+		import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_BACKEND_URL;
+	if (!envUrl) return "";
+	return envUrl.replace(/\/+$/, "");
+};
 
 export async function apiRequest<T>(
 	endpoint: string,
 	options: RequestOptions = {},
 ): Promise<T> {
 	const token = getStoredToken();
-	let url = endpoint.startsWith("/api") ? endpoint : `/api/v1${endpoint}`;
+
+	// Ensure clean path construction without duplicate /api or /api/v1 prefixes
+	let normalizedPath = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+	if (!normalizedPath.startsWith("/api/")) {
+		normalizedPath = `/api/v1${normalizedPath}`;
+	}
+
+	let url = `${getApiBaseUrl()}${normalizedPath}`;
 
 	if (options.params) {
 		const searchParams = new URLSearchParams();
 		for (const [key, value] of Object.entries(options.params)) {
-			if (value !== undefined && value !== null) {
+			if (value === undefined || value === null || value === "") continue;
+			if (Array.isArray(value)) {
+				for (const item of value) {
+					if (item !== undefined && item !== null && item !== "") {
+						searchParams.append(key, String(item));
+					}
+				}
+			} else {
 				searchParams.append(key, String(value));
 			}
 		}
@@ -98,7 +134,12 @@ export async function apiRequest<T>(
 					detail = errorJson.detail;
 				} else if (Array.isArray(errorJson.detail)) {
 					detail = errorJson.detail
-						.map((e: { msg?: string }) => e.msg || JSON.stringify(e))
+						.map((e: { loc?: string[]; msg?: string }) => {
+							const field = e.loc
+								? e.loc.filter((l) => l !== "body").join(".")
+								: "";
+							return field ? `${field}: ${e.msg}` : e.msg || JSON.stringify(e);
+						})
 						.join(", ");
 				}
 			} catch {

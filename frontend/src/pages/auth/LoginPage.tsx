@@ -1,6 +1,6 @@
 import {
 	AlertCircle,
-	CheckCircle,
+	Database,
 	Eye,
 	EyeOff,
 	LifeBuoy,
@@ -14,6 +14,7 @@ import { Button } from "../../components/common/Button";
 import { Input } from "../../components/common/Input";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
+import { DEMO_CREDENTIALS } from "../../services/authService";
 import type { Role } from "../../types/api";
 
 export function LoginPage() {
@@ -21,8 +22,8 @@ export function LoginPage() {
 	const { showToast } = useToast();
 	const navigate = useNavigate();
 
-	const [email, setEmail] = useState("jane.requester@example.com");
-	const [password, setPassword] = useState("Password123!");
+	const [email, setEmail] = useState("requester@example.com");
+	const [password, setPassword] = useState("requesterpassword123");
 	const [showPassword, setShowPassword] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -33,15 +34,15 @@ export function LoginPage() {
 		setLoading(true);
 
 		try {
-			await login(email, password);
-			showToast("Authenticated successfully. Welcome back!", "success");
+			const person = await login(email, password);
+			showToast(`Authenticated as ${person.name}. Welcome back!`, "success");
 
-			// Route based on role
-			if (email.includes("admin")) {
+			// Route based on actual role
+			if (person.role === "admin") {
 				navigate("/admin/dashboard");
-			} else if (email.includes("supervisor")) {
+			} else if (person.role === "supervisor") {
 				navigate("/supervisor/dashboard");
-			} else if (email.includes("assignee")) {
+			} else if (person.role === "assignee") {
 				navigate("/assignee/tickets");
 			} else {
 				navigate("/requester/dashboard");
@@ -57,9 +58,10 @@ export function LoginPage() {
 		}
 	};
 
-	const quickFillPersona = (role: Role, mail: string) => {
-		setEmail(mail);
-		setPassword("Password123!");
+	const quickFillPersona = (role: Role) => {
+		const cred = DEMO_CREDENTIALS[role];
+		setEmail(cred.email);
+		setPassword(cred.password);
 		setError(null);
 		if (mockMode) {
 			switchRole(role);
@@ -91,42 +93,34 @@ export function LoginPage() {
 						<button
 							type="button"
 							className={`demo-persona-btn ${email.includes("requester") ? "selected" : ""}`}
-							onClick={() =>
-								quickFillPersona("requester", "jane.requester@example.com")
-							}
+							onClick={() => quickFillPersona("requester")}
 						>
 							<span className="persona-role">Requester</span>
-							<span className="persona-name">Jane Doe</span>
+							<span className="persona-name">Alice Chen</span>
 						</button>
 						<button
 							type="button"
 							className={`demo-persona-btn ${email.includes("assignee") ? "selected" : ""}`}
-							onClick={() =>
-								quickFillPersona("assignee", "alex.assignee@example.com")
-							}
+							onClick={() => quickFillPersona("assignee")}
 						>
 							<span className="persona-role">Assignee</span>
-							<span className="persona-name">Alex Rivera</span>
+							<span className="persona-name">Carlos Mendoza</span>
 						</button>
 						<button
 							type="button"
 							className={`demo-persona-btn ${email.includes("supervisor") ? "selected" : ""}`}
-							onClick={() =>
-								quickFillPersona("supervisor", "sarah.supervisor@example.com")
-							}
+							onClick={() => quickFillPersona("supervisor")}
 						>
 							<span className="persona-role">Supervisor</span>
-							<span className="persona-name">Sarah Chen</span>
+							<span className="persona-name">David Miller</span>
 						</button>
 						<button
 							type="button"
 							className={`demo-persona-btn ${email.includes("admin") ? "selected" : ""}`}
-							onClick={() =>
-								quickFillPersona("admin", "marcus.admin@example.com")
-							}
+							onClick={() => quickFillPersona("admin")}
 						>
 							<span className="persona-role">Administrator</span>
-							<span className="persona-name">Marcus Vance</span>
+							<span className="persona-name">Administrator</span>
 						</button>
 					</div>
 				</div>
@@ -181,7 +175,7 @@ export function LoginPage() {
 								onChange={(e) => toggleMockMode(e.target.checked)}
 							/>
 							<span className="text-sm">
-								Enable Demo Mock Mode (recommended if backend is 501)
+								Enable Demo Mock Mode (localStorage simulation)
 							</span>
 						</label>
 					</div>
@@ -199,8 +193,17 @@ export function LoginPage() {
 
 				<div className="login-footer">
 					<div className="login-status-badge">
-						<CheckCircle size={13} className="text-success" />
-						<span>Vite 8 • Port 3000 • FastAPI /api/v1 aligned</span>
+						{mockMode ? (
+							<>
+								<span className="mock-indicator-dot" />
+								<span>Offline Mock Mode Active</span>
+							</>
+						) : (
+							<>
+								<Database size={13} className="text-success" />
+								<span>Connected to Live Backend (/api/v1)</span>
+							</>
+						)}
 					</div>
 				</div>
 			</div>
