@@ -57,3 +57,19 @@ class DepartmentCreate(CamelModel):
 
 class CategoryCreate(CamelModel):
     name: str = Field(min_length=1, max_length=200)
+
+
+class AssetCreate(CamelModel):
+    name: str = Field(min_length=1, max_length=200)
+    category_id: UUID
+    department_id: UUID | None = Field(
+        default=None,
+        description="Admins must set it; supervisors may only use their own department",
+    )
+
+
+class AssetUpdate(CamelModel):
+    """Partial update; omitted fields are left unchanged."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    category_id: UUID | None = None

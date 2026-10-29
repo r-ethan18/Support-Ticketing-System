@@ -1030,6 +1030,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - assets
+      summary: Create an asset (supervisor or admin)
+      description: Supervisors create assets in their own department.
+      operationId: create_asset
+      security:
+      - AccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Asset'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/assets/{asset_id}:
     get:
       tags:
@@ -1062,6 +1101,107 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - assets
+      summary: Update an asset (supervisor or admin)
+      operationId: update_asset
+      security:
+      - AccessToken: []
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Asset Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Asset'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - assets
+      summary: Delete an asset (supervisor or admin)
+      description: Fails with 409 while tickets refer to the asset.
+      operationId: delete_asset
+      security:
+      - AccessToken: []
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Asset Id
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Resource already exists
           content:
             application/json:
               schema:
@@ -1879,6 +2019,29 @@ components:
       - departmentId
       - categoryId
       title: Asset
+    AssetCreate:
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Name
+        categoryId:
+          type: string
+          format: uuid
+          title: Categoryid
+        departmentId:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Departmentid
+          description: Admins must set it; supervisors may only use their own department
+      type: object
+      required:
+      - name
+      - categoryId
+      title: AssetCreate
     AssetPage:
       properties:
         items:
@@ -1902,6 +2065,24 @@ components:
       - limit
       - offset
       title: AssetPage
+    AssetUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Name
+        categoryId:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Categoryid
+      type: object
+      title: AssetUpdate
+      description: Partial update; omitted fields are left unchanged.
     AttachmentKind:
       type: string
       enum:
