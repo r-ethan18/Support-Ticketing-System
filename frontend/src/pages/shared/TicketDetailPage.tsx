@@ -75,12 +75,8 @@ export function TicketDetailPage() {
 
 	// Status update state
 	const [updatingStatus, setUpdatingStatus] = useState(false);
-	// Whether we have a live SSE connection (live-backend mode only).
-	const [isLive, setIsLive] = useState(false);
-
 	// Real-time SSE callbacks ---------------------------------------------------
 	const handleStreamComment = useCallback((newComment: TicketComment) => {
-		setIsLive(true);
 		setComments((prev) => {
 			// Deduplicate: the local optimistic update already added this comment
 			// if the current user posted it, so skip duplicates by id.
@@ -89,25 +85,60 @@ export function TicketDetailPage() {
 		});
 	}, []);
 
+	// The stream only says *what* changed; reload the derived lists from the API.
+	const reloadHistory = useCallback(async () => {
+		if (!id) return;
+		try {
+			setHistory(await ticketService.listStatusHistory(id));
+		} catch (err) {
+			console.warn("Failed to refresh status history", err);
+		}
+	}, [id]);
+
+	const reloadAssignments = useCallback(async () => {
+		if (!id) return;
+		try {
+			setAssignments(await ticketService.listAssignments(id));
+		} catch (err) {
+			console.warn("Failed to refresh assignments", err);
+		}
+	}, [id]);
+
 	const handleStreamStatus = useCallback(
 		(ticketId: string, status: TicketStatus, _changedAt: string) => {
-			setIsLive(true);
 			setTicket((prev) =>
 				prev && prev.id === ticketId ? { ...prev, status } : prev,
 			);
+			void reloadHistory();
 		},
-		[],
+		[reloadHistory],
 	);
 
-	useTicketStream(id, {
+	// Events may have been missed (overflow or reconnect): reload everything.
+	const handleStreamResync = useCallback(async () => {
+		if (!id) return;
+		try {
+			const [t, c, a, h] = await Promise.all([
+				ticketService.getTicket(id),
+				ticketService.listComments(id),
+				ticketService.listAssignments(id),
+				ticketService.listStatusHistory(id),
+			]);
+			setTicket(t);
+			setComments(c);
+			setAssignments(a);
+			setHistory(h);
+		} catch (err) {
+			console.warn("Failed to resync ticket", err);
+		}
+	}, [id]);
+
+	const isLive = useTicketStream(id, {
 		onComment: handleStreamComment,
 		onStatus: handleStreamStatus,
+		onAssignment: reloadAssignments,
+		onResync: handleStreamResync,
 	});
-
-	// Mark as live once the SSE hook connects in live mode.
-	useEffect(() => {
-		if (!isMockMode()) setIsLive(true);
-	}, []);
 
 	useEffect(() => {
 		async function loadTicketData() {
