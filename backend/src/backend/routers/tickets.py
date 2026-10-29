@@ -283,38 +283,142 @@ async def delete_ticket(ticket_id: UUID, pool: PoolDep) -> None:
             raise HTTPException(http.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
 
+ASSIGNMENT_COLUMNS = "id, ticket_id, assignee_id, assigned_at, unassigned_at"
+ATTACHMENT_COLUMNS = "id, ticket_id, uploaded_by_id, kind, storage_url, uploaded_at"
+
+
 @router.get(
     "/{ticket_id}/assignments",
     summary="List a ticket's assignment history",
     responses=NOT_FOUND,
 )
-async def list_ticket_assignments(ticket_id: UUID) -> list[TicketAssignment]:
-    not_implemented()
+async def list_ticket_assignments(
+    ticket_id: UUID, user: CurrentUserDep, pool: PoolDep
+) -> list[TicketAssignment]:
+    await get_visible_ticket(pool, ticket_id, user)
+    async with (
+        pool.connection() as conn,
+        conn.cursor(row_factory=class_row(TicketAssignment)) as cur,
+    ):
+        await cur.execute(
+            f"SELECT {ASSIGNMENT_COLUMNS} FROM ticket_assignment"
+            " WHERE ticket_id = %s ORDER BY assigned_at, id",
+            (ticket_id,),
+        )
+        return await cur.fetchall()
 
 
 @router.post(
     "/{ticket_id}/assignments",
     status_code=http.HTTP_201_CREATED,
     summary="Assign a ticket to an assignee (supervisor or admin)",
+    description=(
+        "Several assignees can work on one ticket. Once the ticket has an asset, only"
+        " assignees specialising in the asset's category can be assigned. Assigning an"
+        " `open` ticket moves it to `assigned`."
+    ),
     dependencies=[supervisor_only],
-    responses={**NOT_FOUND, **FORBIDDEN},
+    responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},
 )
 async def create_ticket_assignment(
-    ticket_id: UUID, body: TicketAssignmentCreate
+    ticket_id: UUID, body: TicketAssignmentCreate, user: CurrentUserDep, pool: PoolDep
 ) -> TicketAssignment:
-    not_implemented()
+    ticket = await get_visible_ticket(pool, ticket_id, user)
+    if ticket.status is TicketStatus.closed:
+        raise HTTPException(http.HTTP_409_CONFLICT, detail="Ticket is closed")
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT 1 FROM person WHERE id = %s AND role = 'assignee'",
+            (body.assignee_id,),
+        )
+        if not await cur.fetchone():
+            raise HTTPException(
+                http.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="assigneeId must refer to an assignee",
+            )
+        if ticket.asset_id:
+            cur = await conn.execute(
+                "SELECT 1 FROM asset a JOIN assignee_category ac"
+                " ON ac.category_id = a.category_id"
+                " WHERE a.id = %s AND ac.person_id = %s",
+                (ticket.asset_id, body.assignee_id),
+            )
+            if not await cur.fetchone():
+                raise HTTPException(
+                    http.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Assignee does not specialise in this asset's category",
+                )
+        try:
+            async with conn.cursor(row_factory=class_row(TicketAssignment)) as cur:
+                await cur.execute(
+                    "INSERT INTO ticket_assignment (ticket_id, assignee_id)"
+                    f" VALUES (%s, %s) RETURNING {ASSIGNMENT_COLUMNS}",
+                    (ticket_id, body.assignee_id),
+                )
+                assignment = await cur.fetchone()
+        except psycopg.errors.UniqueViolation:
+            raise HTTPException(
+                http.HTTP_409_CONFLICT, detail="Assignee is already on this ticket"
+            ) from None
+        assert assignment is not None
+        if ticket.status is TicketStatus.open:
+            await _set_status(
+                conn, ticket_id, TicketStatus.open, TicketStatus.assigned, user.id
+            )
+    return assignment
+
+
+async def _set_status(
+    conn: psycopg.AsyncConnection,
+    ticket_id: UUID,
+    old: TicketStatus,
+    new: TicketStatus,
+    changed_by: UUID,
+) -> None:
+    await conn.execute(
+        "UPDATE ticket SET status = %s WHERE id = %s", (new.value, ticket_id)
+    )
+    await conn.execute(
+        "INSERT INTO ticket_status_history (ticket_id, from_status, to_status,"
+        " changed_by_id) VALUES (%s, %s, %s, %s)",
+        (ticket_id, old.value, new.value, changed_by),
+    )
 
 
 @router.delete(
     "/{ticket_id}/assignments/{assignment_id}",
     status_code=http.HTTP_204_NO_CONTENT,
     summary="Unassign (supervisor or admin)",
-    description="Does not delete the row; sets `unassignedAt` so history is preserved.",
+    description=(
+        "Does not delete the row; sets `unassignedAt` so history is preserved."
+        " Removing the last assignee of an `assigned` ticket moves it back to `open`."
+    ),
     dependencies=[supervisor_only],
     responses={**NOT_FOUND, **FORBIDDEN},
 )
-async def delete_ticket_assignment(ticket_id: UUID, assignment_id: UUID) -> None:
-    not_implemented()
+async def delete_ticket_assignment(
+    ticket_id: UUID, assignment_id: UUID, user: CurrentUserDep, pool: PoolDep
+) -> None:
+    ticket = await get_visible_ticket(pool, ticket_id, user)
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            "UPDATE ticket_assignment SET unassigned_at = now()"
+            " WHERE id = %s AND ticket_id = %s AND unassigned_at IS NULL",
+            (assignment_id, ticket_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(
+                http.HTTP_404_NOT_FOUND, detail="Active assignment not found"
+            )
+        cur = await conn.execute(
+            "SELECT 1 FROM ticket_assignment"
+            " WHERE ticket_id = %s AND unassigned_at IS NULL LIMIT 1",
+            (ticket_id,),
+        )
+        if ticket.status is TicketStatus.assigned and not await cur.fetchone():
+            await _set_status(
+                conn, ticket_id, TicketStatus.assigned, TicketStatus.open, user.id
+            )
 
 
 @router.get(
@@ -324,9 +428,25 @@ async def delete_ticket_assignment(ticket_id: UUID, assignment_id: UUID) -> None
 )
 async def list_ticket_attachments(
     ticket_id: UUID,
+    user: CurrentUserDep,
+    pool: PoolDep,
     kind: Annotated[AttachmentKind | None, Query()] = None,
 ) -> list[TicketAttachment]:
-    not_implemented()
+    await get_visible_ticket(pool, ticket_id, user)
+    where, params = ["ticket_id = %s"], [ticket_id]
+    if kind:
+        where.append("kind = %s")
+        params.append(kind.value)
+    async with (
+        pool.connection() as conn,
+        conn.cursor(row_factory=class_row(TicketAttachment)) as cur,
+    ):
+        await cur.execute(
+            f"SELECT {ATTACHMENT_COLUMNS} FROM ticket_attachment"
+            f" WHERE {' AND '.join(where)} ORDER BY uploaded_at, id",
+            params,
+        )
+        return await cur.fetchall()
 
 
 @router.post(
@@ -334,14 +454,41 @@ async def list_ticket_attachments(
     status_code=http.HTTP_201_CREATED,
     summary="Add an attachment to a ticket",
     description=(
-        "`issue_evidence` is added by the requester, `completion_proof` by the assignee."
+        "`issue_evidence` is added by the ticket's requester, `completion_proof` by"
+        " an assignee currently assigned to it. Admins can add either. Closed tickets"
+        " take no new attachments."
     ),
-    responses={**NOT_FOUND, **FORBIDDEN},
+    responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},
 )
 async def create_ticket_attachment(
-    ticket_id: UUID, body: TicketAttachmentCreate, user: CurrentUserDep
+    ticket_id: UUID, body: TicketAttachmentCreate, user: CurrentUserDep, pool: PoolDep
 ) -> TicketAttachment:
-    not_implemented()
+    ticket = await get_visible_ticket(pool, ticket_id, user)
+    allowed = user.role is Role.admin
+    if body.kind is AttachmentKind.issue_evidence:
+        allowed = allowed or ticket.requester_id == user.id
+    elif user.role is Role.assignee:
+        # Visibility already means they are currently assigned.
+        allowed = True
+    if not allowed:
+        raise HTTPException(
+            http.HTTP_403_FORBIDDEN,
+            detail=f"You may not add {body.kind.value} to this ticket",
+        )
+    if ticket.status is TicketStatus.closed:
+        raise HTTPException(http.HTTP_409_CONFLICT, detail="Ticket is closed")
+    async with (
+        pool.connection() as conn,
+        conn.cursor(row_factory=class_row(TicketAttachment)) as cur,
+    ):
+        await cur.execute(
+            "INSERT INTO ticket_attachment (ticket_id, uploaded_by_id, kind,"
+            f" storage_url) VALUES (%s, %s, %s, %s) RETURNING {ATTACHMENT_COLUMNS}",
+            (ticket_id, user.id, body.kind.value, body.storage_url),
+        )
+        attachment = await cur.fetchone()
+    assert attachment is not None
+    return attachment
 
 
 @router.get(
