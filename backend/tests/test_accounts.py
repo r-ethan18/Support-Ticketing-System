@@ -112,106 +112,124 @@ def test_me_requires_token(db_client: TestClient) -> None:
     assert db_client.get(f"{API}/auth/me").status_code == 401
 
 
-def test_admin_creates_supervisor_and_assignee(
+def test_admin_promotes_signed_up_person_to_supervisor_then_assignee(
     db_client: TestClient, seed: Seeder, departments: dict[str, object]
 ) -> None:
     _, admin = login_as(db_client, seed, Role.admin)
-    supervisor = db_client.post(
-        f"{API}/people",
-        json={
-            "name": "Sue",
-            "email": new_email(),
-            "phone": "+1",
-            "password": PASSWORD,
-            "role": "supervisor",
-            "departmentId": str(departments["dept"]),
-        },
+    person = seed.person(Role.requester)
+    url = f"{API}/people/{person}/role"
+
+    supervisor = db_client.put(
+        url,
+        json={"role": "supervisor", "departmentId": str(departments["dept"])},
         headers=admin,
     )
-    assert supervisor.status_code == 201, supervisor.text
-    forget(seed, supervisor.json()["id"])
+    assert supervisor.status_code == 200, supervisor.text
+    assert supervisor.json()["role"] == "supervisor"
     assert supervisor.json()["departmentId"] == str(departments["dept"])
 
-    assignee = db_client.post(
-        f"{API}/people",
-        json={
-            "name": "Al",
-            "email": new_email(),
-            "phone": "+1",
-            "password": PASSWORD,
-            "role": "assignee",
-            "vendorId": str(departments["vendor"]),
-            "categoryIds": [str(departments["cat"])],
-        },
+    # Switching roles replaces the department with the vendor.
+    assignee = db_client.put(
+        url,
+        json={"role": "assignee", "vendorId": str(departments["vendor"])},
         headers=admin,
     )
-    assert assignee.status_code == 201, assignee.text
-    forget(seed, assignee.json()["id"])
     assert assignee.json()["vendorId"] == str(departments["vendor"])
+    assert assignee.json()["departmentId"] is None
 
-    cats = db_client.get(
-        f"{API}/people/{assignee.json()['id']}/categories", headers=admin
-    )
-    assert [c["id"] for c in cats.json()] == [str(departments["cat"])]
+    demoted = db_client.put(url, json={"role": "requester"}, headers=admin)
+    assert demoted.json()["role"] == "requester"
+    assert demoted.json()["vendorId"] is None
 
-    by_cat = db_client.get(
-        f"{API}/people", params={"categoryId": str(departments["cat"])}, headers=admin
+
+def test_new_role_applies_at_next_login(
+    db_client: TestClient, seed: Seeder, departments: dict[str, object]
+) -> None:
+    _, admin = login_as(db_client, seed, Role.admin)
+    person = seed.person(Role.requester)
+    db_client.put(
+        f"{API}/people/{person}/role",
+        json={"role": "supervisor", "departmentId": str(departments["dept"])},
+        headers=admin,
     )
-    assert [p["id"] for p in by_cat.json()["items"]] == [assignee.json()["id"]]
+    email = seed.conn.execute(
+        "SELECT email FROM person WHERE id = %s", (person,)
+    ).fetchone()[0]
+    token = sign_in(db_client, email).json()["accessToken"]
+    me = db_client.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.json()["role"] == "supervisor"
+    assert (
+        db_client.get(
+            f"{API}/people", headers={"Authorization": f"Bearer {token}"}
+        ).status_code
+        == 200
+    )
 
 
 @pytest.mark.parametrize(
-    "extra",
+    "body",
     [
-        {"role": "requester"},
         {"role": "admin"},
         {"role": "supervisor"},  # no department
-        {"role": "assignee", "departmentId": str(uuid4())},
-        {
-            "role": "supervisor",
-            "departmentId": str(uuid4()),
-            "categoryIds": [str(uuid4())],
-        },
+        {"role": "assignee"},  # no vendor
+        {"role": "requester", "vendorId": str(uuid4())},
+        {"role": "assignee", "vendorId": str(uuid4()), "departmentId": str(uuid4())},
+        {"role": "supervisor", "departmentId": str(uuid4()), "vendorId": str(uuid4())},
     ],
 )
-def test_staff_create_validates_role_fields(
-    db_client: TestClient, seed: Seeder, extra: dict[str, object]
+def test_role_assignment_validates_fields(
+    db_client: TestClient, seed: Seeder, body: dict[str, object]
 ) -> None:
     _, admin = login_as(db_client, seed, Role.admin)
-    body = {
-        "name": "X",
-        "email": new_email(),
-        "phone": "+1",
-        "password": PASSWORD,
-    } | extra
-    assert db_client.post(f"{API}/people", json=body, headers=admin).status_code == 422
-
-
-def test_staff_create_unknown_department_is_422(
-    db_client: TestClient, seed: Seeder
-) -> None:
-    _, admin = login_as(db_client, seed, Role.admin)
-    response = db_client.post(
-        f"{API}/people",
-        json={
-            "name": "X",
-            "email": new_email(),
-            "phone": "+1",
-            "password": PASSWORD,
-            "role": "supervisor",
-            "departmentId": str(uuid4()),
-        },
-        headers=admin,
-    )
+    person = seed.person(Role.requester)
+    response = db_client.put(f"{API}/people/{person}/role", json=body, headers=admin)
     assert response.status_code == 422
 
 
+def test_role_assignment_unknown_references_and_targets(
+    db_client: TestClient, seed: Seeder
+) -> None:
+    _, admin = login_as(db_client, seed, Role.admin)
+    person = seed.person(Role.requester)
+    unknown = db_client.put(
+        f"{API}/people/{person}/role",
+        json={"role": "supervisor", "departmentId": str(uuid4())},
+        headers=admin,
+    )
+    assert unknown.status_code == 422
+    other_admin = seed.person(Role.admin)
+    assert (
+        db_client.put(
+            f"{API}/people/{other_admin}/role",
+            json={"role": "requester"},
+            headers=admin,
+        ).status_code
+        == 403
+    )
+    assert (
+        db_client.put(
+            f"{API}/people/{uuid4()}/role", json={"role": "requester"}, headers=admin
+        ).status_code
+        == 404
+    )
+
+
 @pytest.mark.parametrize("role", [Role.requester, Role.assignee, Role.supervisor])
-def test_non_admins_cannot_create_or_delete_staff(
+def test_only_admins_assign_roles(
     db_client: TestClient, seed: Seeder, role: Role
 ) -> None:
     _, headers = login_as(db_client, seed, role)
-    assert db_client.post(f"{API}/people", json={}, headers=headers).status_code == 403
+    response = db_client.put(
+        f"{API}/people/{uuid4()}/role", json={"role": "requester"}, headers=headers
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("role", [Role.requester, Role.assignee, Role.supervisor])
+def test_non_admins_cannot_delete_staff(
+    db_client: TestClient, seed: Seeder, role: Role
+) -> None:
+    _, headers = login_as(db_client, seed, role)
     assert (
         db_client.delete(f"{API}/people/{uuid4()}", headers=headers).status_code == 403
     )

@@ -172,17 +172,6 @@ paths:
             format: uuid
           - type: 'null'
           title: Departmentid
-      - name: categoryId
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          description: Only assignees specialising in this category
-          title: Categoryid
-        description: Only assignees specialising in this category
       - name: q
         in: query
         required: false
@@ -235,21 +224,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-    post:
+  /api/v1/people/{person_id}/role:
+    put:
       tags:
       - people
-      summary: Create a supervisor or assignee (admin only)
-      operationId: create_staff
+      summary: Assign a person's role (admin only)
+      description: Everyone signs up as a `requester`; an admin promotes them. A `supervisor`
+        needs a `departmentId`; an `assignee` (a vendor's technician) needs a `vendorId`.
+        Setting `requester` clears both. Admin accounts are created with `POST /admins`
+        and their role cannot be changed here. The person's current access token keeps
+        its old role until it expires.
+      operationId: assign_role
       security:
       - AccessToken: []
+      parameters:
+      - name: person_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Person Id
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/StaffCreate'
+              $ref: '#/components/schemas/RoleAssignment'
       responses:
-        '201':
+        '200':
           description: Successful Response
           content:
             application/json:
@@ -257,6 +260,12 @@ paths:
                 $ref: '#/components/schemas/Person'
         '401':
           description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
           content:
             application/json:
               schema:
@@ -366,56 +375,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Resource already exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/people/{person_id}/categories:
-    get:
-      tags:
-      - people
-      summary: List the categories an assignee specialises in
-      operationId: list_person_categories
-      security:
-      - AccessToken: []
-      parameters:
-      - name: person_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Person Id
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Category'
-                title: Response List Person Categories
-        '401':
-          description: Missing or invalid access token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '403':
-          description: Caller's role may not do this
           content:
             application/json:
               schema:
@@ -2158,30 +2117,8 @@ components:
       - supervisor
       - admin
       title: Role
-    SortOrder:
-      type: string
-      enum:
-      - asc
-      - desc
-      title: SortOrder
-    StaffCreate:
+    RoleAssignment:
       properties:
-        name:
-          type: string
-          minLength: 1
-          title: Name
-        email:
-          type: string
-          minLength: 3
-          title: Email
-        phone:
-          type: string
-          title: Phone
-        password:
-          type: string
-          maxLength: 128
-          minLength: 12
-          title: Password
         role:
           $ref: '#/components/schemas/Role'
         vendorId:
@@ -2190,30 +2127,25 @@ components:
             format: uuid
           - type: 'null'
           title: Vendorid
-          description: Employer, for assignees only
+          description: Employer; required for assignees
         departmentId:
           anyOf:
           - type: string
             format: uuid
           - type: 'null'
           title: Departmentid
-          description: Required for supervisors, not allowed otherwise
-        categoryIds:
-          items:
-            type: string
-            format: uuid
-          type: array
-          title: Categoryids
-          description: Categories an assignee specialises in (assignees only)
+          description: Required for supervisors
       type: object
       required:
-      - name
-      - email
-      - phone
-      - password
       - role
-      title: StaffCreate
-      description: Admin-created supervisor or assignee account.
+      title: RoleAssignment
+      description: What an admin sets on an existing person.
+    SortOrder:
+      type: string
+      enum:
+      - asc
+      - desc
+      title: SortOrder
     Ticket:
       properties:
         id:
