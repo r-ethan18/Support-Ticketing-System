@@ -8,10 +8,10 @@ from backend.auth import CurrentUserDep
 from backend.credentials import CredentialStore, get_credential_store
 from backend.db import PoolDep, fetch_or_404
 from backend.errors import CONFLICT, UNAUTHORIZED
-from backend.schemas.auth import TokenRequest, TokenResponse
+from backend.schemas.auth import PasswordChange, TokenRequest, TokenResponse
 from backend.schemas.enums import Role
 from backend.schemas.people import Person, RegisterRequest
-from backend.security import encode_access_token, verify_password
+from backend.security import encode_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -77,3 +77,49 @@ async def get_me(user: CurrentUserDep, pool: PoolDep) -> Person:
         [user.id],
         "Person",
     )
+
+
+@router.post(
+    "/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Change the authenticated person's password",
+    responses={
+        **UNAUTHORIZED,
+        400: {"description": "Current password is wrong, or the new one is unchanged"},
+    },
+)
+async def change_password(
+    body: PasswordChange, user: CurrentUserDep, pool: PoolDep
+) -> None:
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT password_hash FROM person_credential WHERE person_id = %s",
+            (user.id,),
+        )
+        row = await cur.fetchone()
+    if row is None:
+        # Token for a person who has since been deleted.
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    current_hash: str = row[0]
+    if not await run_in_threadpool(
+        verify_password, body.current_password, current_hash
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect"
+        )
+    if body.new_password == body.current_password:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="New password must differ from the current one",
+        )
+    new_hash = await run_in_threadpool(hash_password, body.new_password)
+    async with pool.connection() as conn:
+        await conn.execute(
+            "UPDATE person_credential SET password_hash = %s, updated_at = now()"
+            " WHERE person_id = %s",
+            (new_hash, user.id),
+        )
