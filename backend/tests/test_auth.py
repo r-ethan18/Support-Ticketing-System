@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from backend.schemas.enums import Role
-from tests.conftest import PASSWORD, Seeder, login, login_as
+from tests.conftest import PASSWORD, Seeder, login_as
 
 TICKET = "/api/v1/tickets/00000000-0000-0000-0000-000000000000"
 
@@ -51,10 +51,9 @@ def test_protected_route_rejects_bad_token(client: TestClient) -> None:
     assert response.headers["www-authenticate"] == "Bearer"
 
 
-def test_valid_token_passes_auth(client: TestClient) -> None:
-    # The comments route is still a skeleton, so 501 means auth let us through.
-    response = client.get(f"{TICKET}/comments", headers=login(client, Role.requester))
-    assert response.status_code == 501
+def test_valid_token_passes_auth(db_client: TestClient, seed: Seeder) -> None:
+    _, headers = login_as(db_client, seed, Role.requester)
+    assert db_client.get("/api/v1/tickets", headers=headers).status_code == 200
 
 
 def test_supervisor_only_route(db_client: TestClient, seed: Seeder) -> None:

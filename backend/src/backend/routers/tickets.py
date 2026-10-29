@@ -9,7 +9,7 @@ from psycopg.rows import class_row
 
 from backend.auth import CurrentUserDep, require_roles
 from backend.db import PoolDep, fetch_page, like_pattern
-from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND, not_implemented
+from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND
 from backend.routers.deps import PaginationDep
 from backend.schemas.enums import (
     AttachmentKind,
@@ -491,23 +491,59 @@ async def create_ticket_attachment(
     return attachment
 
 
+COMMENT_COLUMNS = "id, ticket_id, author_id, body, created_at"
+
+
 @router.get(
-    "/{ticket_id}/comments", summary="List a ticket's comments", responses=NOT_FOUND
+    "/{ticket_id}/comments",
+    summary="List a ticket's comments",
+    description="Oldest first. Visible to everyone who can see the ticket.",
+    responses=NOT_FOUND,
 )
-async def list_ticket_comments(ticket_id: UUID) -> list[TicketComment]:
-    not_implemented()
+async def list_ticket_comments(
+    ticket_id: UUID, user: CurrentUserDep, pool: PoolDep
+) -> list[TicketComment]:
+    await get_visible_ticket(pool, ticket_id, user)
+    async with (
+        pool.connection() as conn,
+        conn.cursor(row_factory=class_row(TicketComment)) as cur,
+    ):
+        await cur.execute(
+            f"SELECT {COMMENT_COLUMNS} FROM ticket_comment"
+            " WHERE ticket_id = %s ORDER BY created_at, id",
+            (ticket_id,),
+        )
+        return await cur.fetchall()
 
 
 @router.post(
     "/{ticket_id}/comments",
     status_code=http.HTTP_201_CREATED,
     summary="Comment on a ticket",
-    responses=NOT_FOUND,
+    description=(
+        "The ticket's chat: its requester, supervisors, current assignees and admins"
+        " can post. Closed tickets are read-only."
+    ),
+    responses={**NOT_FOUND, **CONFLICT},
 )
 async def create_ticket_comment(
-    ticket_id: UUID, body: TicketCommentCreate, user: CurrentUserDep
+    ticket_id: UUID, body: TicketCommentCreate, user: CurrentUserDep, pool: PoolDep
 ) -> TicketComment:
-    not_implemented()
+    ticket = await get_visible_ticket(pool, ticket_id, user)
+    if ticket.status is TicketStatus.closed:
+        raise HTTPException(http.HTTP_409_CONFLICT, detail="Ticket is closed")
+    async with (
+        pool.connection() as conn,
+        conn.cursor(row_factory=class_row(TicketComment)) as cur,
+    ):
+        await cur.execute(
+            "INSERT INTO ticket_comment (ticket_id, author_id, body)"
+            f" VALUES (%s, %s, %s) RETURNING {COMMENT_COLUMNS}",
+            (ticket_id, user.id, body.body),
+        )
+        comment = await cur.fetchone()
+    assert comment is not None
+    return comment
 
 
 @router.get(

@@ -102,3 +102,13 @@ CREATE TABLE IF NOT EXISTS ticket_attachment (
 );
 
 CREATE INDEX IF NOT EXISTS ticket_attachment_ticket_idx ON ticket_attachment (ticket_id);
+
+CREATE TABLE IF NOT EXISTS ticket_comment (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticket_id  uuid NOT NULL REFERENCES ticket (id) ON DELETE CASCADE,
+    author_id  uuid NOT NULL REFERENCES person (id),
+    body       text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ticket_comment_ticket_idx ON ticket_comment (ticket_id, created_at);

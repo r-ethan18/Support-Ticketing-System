@@ -1,6 +1,5 @@
-from typing import Any, NoReturn
+from typing import Any
 
-from fastapi import HTTPException, status
 from pydantic import BaseModel
 
 
@@ -22,10 +21,3 @@ CONFLICT: dict[int | str, dict[str, Any]] = {
 NOT_FOUND: dict[int | str, dict[str, Any]] = {
     404: {"model": ErrorResponse, "description": "Resource not found"},
 }
-
-
-def not_implemented() -> NoReturn:
-    """Placeholder body for every endpoint while the contract is being settled."""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Not implemented"
-    )
