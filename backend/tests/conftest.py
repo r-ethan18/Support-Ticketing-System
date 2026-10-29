@@ -1,5 +1,6 @@
+import os
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, NoReturn
 from uuid import UUID, uuid4
 
 import psycopg
@@ -62,6 +63,14 @@ def login(client: TestClient, role: Role) -> dict[str, str]:
     return {"Authorization": f"Bearer {response.json()['accessToken']}"}
 
 
+def database_unreachable(exc: Exception) -> NoReturn:
+    """Skip DB tests locally; fail them where a database is required (CI)."""
+    message = f"Postgres not reachable ({exc}); set DB_* to run database tests"
+    if os.environ.get("REQUIRE_DB"):
+        pytest.fail(message)
+    pytest.skip(message)
+
+
 class Seeder:
     """Inserts rows into the real database and removes them again on teardown.
 
@@ -114,8 +123,8 @@ def seed() -> Iterator[Seeder]:
         conn = psycopg.connect(
             get_settings().database.conninfo, connect_timeout=2, autocommit=True
         )
-    except psycopg.OperationalError:
-        pytest.skip("Postgres not reachable; set DB_* to run database tests")
+    except psycopg.OperationalError as exc:
+        database_unreachable(exc)
     with conn:
         conn.execute(SCHEMA_PATH.read_text())
         seeder = Seeder(conn)

@@ -10,7 +10,7 @@ from backend.db import SCHEMA_PATH
 from backend.main import create_app
 from backend.security import hash_password
 
-from .conftest import PASSWORD
+from .conftest import PASSWORD, database_unreachable
 
 EMAIL = "Db.User@Example.com"
 
@@ -48,8 +48,8 @@ def seeded_db() -> Iterator[UUID]:
     conninfo = get_settings().database.conninfo
     try:
         conn = psycopg.connect(conninfo, connect_timeout=2, autocommit=True)
-    except psycopg.OperationalError:
-        pytest.skip("Postgres not reachable; set DB_* to run database tests")
+    except psycopg.OperationalError as exc:
+        database_unreachable(exc)
     with conn:
         conn.execute(SCHEMA_PATH.read_text())
         person_id = conn.execute(
