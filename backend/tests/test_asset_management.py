@@ -135,3 +135,47 @@ def test_cannot_delete_asset_with_tickets(
         db_client.delete(f"{API}/{created.json()['id']}", headers=sup).status_code
         == 409
     )
+
+
+def test_vendors_linked_to_assets(
+    db_client: TestClient, seed: Seeder, world: dict[str, object]
+) -> None:
+    _, sup = login_as(db_client, seed, Role.supervisor, department_id=world["dept"])
+    _, rival = login_as(db_client, seed, Role.supervisor, department_id=world["other"])
+    _, requester = login_as(db_client, seed, Role.requester)
+    vendor = seed.insert("vendor", name=f"V {uuid4().hex[:8]}")
+    asset = db_client.post(API, json=body(world), headers=sup)
+    track(seed, asset)
+    url = f"{API}/{asset.json()['id']}/vendors/{vendor}"
+    seed._links.append((asset.json()["id"], vendor))
+
+    assert db_client.put(url, headers=rival).status_code == 403
+    assert db_client.put(url, headers=requester).status_code == 403
+    assert db_client.put(url, headers=sup).status_code == 204
+    assert db_client.put(url, headers=sup).status_code == 204  # idempotent
+    unknown = db_client.put(
+        f"{API}/{asset.json()['id']}/vendors/{uuid4()}", headers=sup
+    )
+    assert unknown.status_code == 404
+
+    listed = db_client.get(f"{API}/{asset.json()['id']}/vendors", headers=requester)
+    assert [v["id"] for v in listed.json()] == [str(vendor)]
+    by_vendor = db_client.get(API, params={"vendorId": str(vendor)}, headers=requester)
+    assert [a["id"] for a in by_vendor.json()["items"]] == [asset.json()["id"]]
+    vendors = db_client.get(
+        "/api/v1/vendors", params={"assetId": asset.json()["id"]}, headers=requester
+    )
+    assert [v["id"] for v in vendors.json()["items"]] == [str(vendor)]
+
+    # A vendor with responsibilities cannot be deleted from under the assets.
+    _, admin = login_as(db_client, seed, Role.admin)
+    assert (
+        db_client.delete(f"/api/v1/vendors/{vendor}", headers=admin).status_code == 409
+    )
+
+    assert db_client.delete(url, headers=rival).status_code == 403
+    assert db_client.delete(url, headers=sup).status_code == 204
+    assert db_client.delete(url, headers=sup).status_code == 404
+    assert (
+        db_client.get(f"{API}/{asset.json()['id']}/vendors", headers=sup).json() == []
+    )

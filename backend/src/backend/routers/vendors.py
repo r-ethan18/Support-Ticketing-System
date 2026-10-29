@@ -24,10 +24,17 @@ router = APIRouter(prefix="/vendors", tags=["vendors"])
 async def list_vendors(
     page: PaginationDep,
     pool: PoolDep,
+    asset_id: Annotated[
+        UUID | None,
+        Query(alias="assetId", description="Vendors responsible for this asset"),
+    ] = None,
     q: Annotated[str | None, Query(description="Match on name")] = None,
 ) -> VendorPage:
     """Employees of a vendor: `GET /people?vendorId=...`."""
     where, params = [], []
+    if asset_id:
+        where.append("id IN (SELECT vendor_id FROM asset_vendor WHERE asset_id = %s)")
+        params.append(asset_id)
     if q:
         where.append("name ILIKE %s")
         params.append(like_pattern(q))

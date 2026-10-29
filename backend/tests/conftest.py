@@ -81,6 +81,7 @@ class Seeder:
     def __init__(self, conn: psycopg.Connection) -> None:
         self.conn = conn
         self._created: list[tuple[str, UUID]] = []
+        self._links: list[tuple[UUID, UUID]] = []
 
     def insert(self, table: str, **values: Any) -> UUID:
         columns = ", ".join(values)
@@ -108,7 +109,19 @@ class Seeder:
         )
         return person_id
 
+    def link_vendor(self, asset_id: UUID, vendor_id: UUID) -> None:
+        self.conn.execute(
+            "INSERT INTO asset_vendor (asset_id, vendor_id) VALUES (%s, %s)",
+            (asset_id, vendor_id),
+        )
+        self._links.append((asset_id, vendor_id))
+
     def cleanup(self) -> None:
+        for asset_id, vendor_id in self._links:
+            self.conn.execute(
+                "DELETE FROM asset_vendor WHERE asset_id = %s AND vendor_id = %s",
+                (asset_id, vendor_id),
+            )
         # Tickets reference people regardless of which was created first.
         newest_first = list(reversed(self._created))
         tickets = [row for row in newest_first if row[0] == "ticket"]

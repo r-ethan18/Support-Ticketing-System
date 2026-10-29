@@ -3,6 +3,7 @@ from uuid import UUID
 
 import psycopg.errors
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from psycopg.rows import class_row
 
 from backend.auth import CurrentUser, CurrentUserDep, require_roles
 from backend.db import (
@@ -15,7 +16,7 @@ from backend.db import (
 )
 from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND
 from backend.routers.deps import PaginationDep
-from backend.schemas.assets import Asset, AssetCreate, AssetPage, AssetUpdate
+from backend.schemas.assets import Asset, AssetCreate, AssetPage, AssetUpdate, Vendor
 from backend.schemas.enums import Role
 
 router = APIRouter(prefix="/assets", tags=["assets"])
@@ -29,6 +30,10 @@ async def list_assets(
     pool: PoolDep,
     department_id: Annotated[UUID | None, Query(alias="departmentId")] = None,
     category_id: Annotated[UUID | None, Query(alias="categoryId")] = None,
+    vendor_id: Annotated[
+        UUID | None,
+        Query(alias="vendorId", description="Assets this vendor is responsible for"),
+    ] = None,
     q: Annotated[str | None, Query(description="Match on name")] = None,
 ) -> AssetPage:
     where: list[str] = []
@@ -39,6 +44,9 @@ async def list_assets(
     if category_id:
         where.append("category_id = %s")
         params.append(category_id)
+    if vendor_id:
+        where.append("id IN (SELECT asset_id FROM asset_vendor WHERE vendor_id = %s)")
+        params.append(vendor_id)
     if q:
         where.append("name ILIKE %s")
         params.append(like_pattern(q))
@@ -173,3 +181,71 @@ async def update_asset(
 async def delete_asset(asset_id: UUID, user: CurrentUserDep, pool: PoolDep) -> None:
     await get_manageable_asset(asset_id, user, pool)
     await delete_by_id(pool, "asset", asset_id, "Asset")
+
+
+@router.get(
+    "/{asset_id}/vendors",
+    summary="List the vendors responsible for an asset",
+    responses=NOT_FOUND,
+)
+async def list_asset_vendors(asset_id: UUID, pool: PoolDep) -> list[Vendor]:
+    await fetch_or_404(
+        pool, Asset, f"SELECT {COLUMNS} FROM asset WHERE id = %s", [asset_id], "Asset"
+    )
+    async with (
+        pool.connection() as conn,
+        conn.cursor(row_factory=class_row(Vendor)) as cur,
+    ):
+        await cur.execute(
+            "SELECT v.id, v.name FROM vendor v JOIN asset_vendor av"
+            " ON av.vendor_id = v.id WHERE av.asset_id = %s ORDER BY v.name, v.id",
+            (asset_id,),
+        )
+        return await cur.fetchall()
+
+
+@router.put(
+    "/{asset_id}/vendors/{vendor_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Make a vendor responsible for an asset (supervisor or admin)",
+    description="Idempotent. Supervisors can only do this for their department's assets.",
+    dependencies=[supervisor_only],
+    responses={**NOT_FOUND, **FORBIDDEN},
+)
+async def add_asset_vendor(
+    asset_id: UUID, vendor_id: UUID, user: CurrentUserDep, pool: PoolDep
+) -> None:
+    await get_manageable_asset(asset_id, user, pool)
+    try:
+        async with pool.connection() as conn:
+            await conn.execute(
+                "INSERT INTO asset_vendor (asset_id, vendor_id) VALUES (%s, %s)"
+                " ON CONFLICT DO NOTHING",
+                (asset_id, vendor_id),
+            )
+    except psycopg.errors.ForeignKeyViolation:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Vendor not found"
+        ) from None
+
+
+@router.delete(
+    "/{asset_id}/vendors/{vendor_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove a vendor's responsibility for an asset (supervisor or admin)",
+    dependencies=[supervisor_only],
+    responses={**NOT_FOUND, **FORBIDDEN},
+)
+async def remove_asset_vendor(
+    asset_id: UUID, vendor_id: UUID, user: CurrentUserDep, pool: PoolDep
+) -> None:
+    await get_manageable_asset(asset_id, user, pool)
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            "DELETE FROM asset_vendor WHERE asset_id = %s AND vendor_id = %s",
+            (asset_id, vendor_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, detail="Vendor is not linked to this asset"
+            )

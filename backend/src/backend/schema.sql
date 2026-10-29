@@ -43,12 +43,6 @@ CREATE TABLE IF NOT EXISTS person_credential (
 ALTER TABLE person ADD COLUMN IF NOT EXISTS vendor_id uuid REFERENCES vendor (id);
 ALTER TABLE person ADD COLUMN IF NOT EXISTS department_id uuid REFERENCES department (id);
 
-CREATE TABLE IF NOT EXISTS assignee_category (
-    person_id   uuid NOT NULL REFERENCES person (id) ON DELETE CASCADE,
-    category_id uuid NOT NULL REFERENCES category (id) ON DELETE CASCADE,
-    PRIMARY KEY (person_id, category_id)
-);
-
 CREATE TABLE IF NOT EXISTS ticket (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     title         text NOT NULL,
@@ -117,3 +111,13 @@ CREATE INDEX IF NOT EXISTS ticket_comment_ticket_idx ON ticket_comment (ticket_i
 CREATE UNIQUE INDEX IF NOT EXISTS department_name_lower_key ON department (lower(name));
 CREATE UNIQUE INDEX IF NOT EXISTS vendor_name_lower_key ON vendor (lower(name));
 CREATE UNIQUE INDEX IF NOT EXISTS category_name_lower_key ON category (lower(name));
+
+-- Vendors are responsible for (the contact for repairing) the assets they are linked to.
+CREATE TABLE IF NOT EXISTS asset_vendor (
+    asset_id  uuid NOT NULL REFERENCES asset (id) ON DELETE CASCADE,
+    vendor_id uuid NOT NULL REFERENCES vendor (id),
+    PRIMARY KEY (asset_id, vendor_id)
+);
+
+-- Superseded by asset_vendor: assignees now qualify through their vendor.
+DROP TABLE IF EXISTS assignee_category;

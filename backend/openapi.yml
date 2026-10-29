@@ -395,6 +395,17 @@ paths:
       security:
       - AccessToken: []
       parameters:
+      - name: assetId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          description: Vendors responsible for this asset
+          title: Assetid
+        description: Vendors responsible for this asset
       - name: q
         in: query
         required: false
@@ -984,6 +995,17 @@ paths:
             format: uuid
           - type: 'null'
           title: Categoryid
+      - name: vendorId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          description: Assets this vendor is responsible for
+          title: Vendorid
+        description: Assets this vendor is responsible for
       - name: q
         in: query
         required: false
@@ -1202,6 +1224,151 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Resource already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/assets/{asset_id}/vendors:
+    get:
+      tags:
+      - assets
+      summary: List the vendors responsible for an asset
+      operationId: list_asset_vendors
+      security:
+      - AccessToken: []
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Asset Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Vendor'
+                title: Response List Asset Vendors
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/assets/{asset_id}/vendors/{vendor_id}:
+    put:
+      tags:
+      - assets
+      summary: Make a vendor responsible for an asset (supervisor or admin)
+      description: Idempotent. Supervisors can only do this for their department's
+        assets.
+      operationId: add_asset_vendor
+      security:
+      - AccessToken: []
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Asset Id
+      - name: vendor_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Vendor Id
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - assets
+      summary: Remove a vendor's responsibility for an asset (supervisor or admin)
+      operationId: remove_asset_vendor
+      security:
+      - AccessToken: []
+      parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Asset Id
+      - name: vendor_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Vendor Id
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
           content:
             application/json:
               schema:
@@ -1606,8 +1773,8 @@ paths:
       - tickets
       summary: Assign a ticket to an assignee (supervisor or admin)
       description: Several assignees can work on one ticket. Once the ticket has an
-        asset, only assignees specialising in the asset's category can be assigned.
-        Assigning an `open` ticket moves it to `assigned`.
+        asset, only assignees employed by a vendor responsible for that asset can
+        be assigned. Assigning an `open` ticket moves it to `assigned`.
       operationId: create_ticket_assignment
       security:
       - AccessToken: []
