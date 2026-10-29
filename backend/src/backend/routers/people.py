@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.accounts import PERSON_COLUMNS
 from backend.auth import CurrentUserDep, require_roles
+from backend.cascade import delete_person as delete_person_data
 from backend.cascade import release_assignments
 from backend.db import PoolDep, fetch_or_404, fetch_page, like_pattern
 from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND
@@ -158,11 +159,12 @@ async def get_person(person_id: UUID, user: CurrentUserDep, pool: PoolDep) -> Pe
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a person (admin only)",
     description=(
-        "Admin accounts cannot be deleted here. Deleting a person also deletes the"
-        " tickets they requested. An assignee is first taken off the tickets they"
-        " are on (a ticket left with nobody goes back to `open`). A supervisor's"
-        " tickets lose their supervisor. Comments, uploads, history and past"
-        " assignments are kept, with the person blanked."
+        "Admin accounts cannot be deleted here. Nothing other people are involved in"
+        " is destroyed: the person's tickets, comments, uploads, history and past"
+        " assignments stay, with the person shown as a deleted user (`null` id)."
+        " Only closed tickets nobody else touched are removed. An assignee is first"
+        " taken off the tickets they are on (a ticket left with nobody goes back to"
+        " `open`), and a supervisor's tickets lose their supervisor."
     ),
     dependencies=[Depends(require_roles(Role.admin))],
     responses={**NOT_FOUND, **FORBIDDEN},
@@ -180,5 +182,4 @@ async def delete_person(person_id: UUID, user: CurrentUserDep, pool: PoolDep) ->
             status.HTTP_403_FORBIDDEN, detail="Admin accounts cannot be deleted here"
         )
     async with pool.connection() as conn:
-        await release_assignments(conn, [person_id], user.id)
-        await conn.execute("DELETE FROM person WHERE id = %s", (person_id,))
+        await delete_person_data(conn, person_id, user.id)

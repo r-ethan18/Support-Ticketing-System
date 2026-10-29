@@ -16,7 +16,9 @@ class Ticket(CamelModel):
     status: TicketStatus
     created_at: datetime
     closed_at: datetime | None = None
-    requester_id: UUID
+    requester_id: UUID | None = Field(
+        default=None, description="Null once the requester's account is deleted"
+    )
     # Unknown to the requester; filled in later by a supervisor.
     asset_id: UUID | None = None
     supervisor_id: UUID | None = None

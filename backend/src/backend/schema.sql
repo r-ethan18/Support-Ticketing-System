@@ -146,9 +146,10 @@ CREATE TABLE IF NOT EXISTS refresh_token (
 CREATE INDEX IF NOT EXISTS refresh_token_person_idx ON refresh_token (person_id);
 CREATE INDEX IF NOT EXISTS refresh_token_family_idx ON refresh_token (family_id);
 
--- Deleting a person: their own tickets go with them, while records they merely
--- took part in (comments, uploads, history, past assignments) are kept with the
--- person blanked. `ticket.supervisor_id` already behaves that way.
+-- Deleting a person never destroys what other people are involved in: tickets,
+-- comments, uploads, history and past assignments are kept with the person
+-- blanked (a "deleted user"). `ticket.supervisor_id` already behaves that way.
+ALTER TABLE ticket ALTER COLUMN requester_id DROP NOT NULL;
 ALTER TABLE ticket_assignment ALTER COLUMN assignee_id DROP NOT NULL;
 ALTER TABLE ticket_attachment ALTER COLUMN uploaded_by_id DROP NOT NULL;
 ALTER TABLE ticket_comment ALTER COLUMN author_id DROP NOT NULL;
@@ -160,15 +161,11 @@ DECLARE
 BEGIN
     FOR fk IN
         SELECT * FROM (VALUES
-            ('ticket', 'requester_id', 'person', 'c'),
+            ('ticket', 'requester_id', 'person', 'n'),
             ('ticket_assignment', 'assignee_id', 'person', 'n'),
             ('ticket_attachment', 'uploaded_by_id', 'person', 'n'),
             ('ticket_comment', 'author_id', 'person', 'n'),
-            ('ticket_status_history', 'changed_by_id', 'person', 'n'),
-            -- Removing an asset sends its tickets back to triage; removing a
-            -- vendor drops its responsibilities.
-            ('ticket', 'asset_id', 'asset', 'n'),
-            ('asset_vendor', 'vendor_id', 'vendor', 'c')
+            ('ticket_status_history', 'changed_by_id', 'person', 'n')
         ) AS v (tbl, col, ref, on_delete)
     LOOP
         IF NOT EXISTS (
