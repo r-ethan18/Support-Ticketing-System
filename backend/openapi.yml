@@ -11,7 +11,12 @@ paths:
       - auth
       summary: Exchange credentials for an access token
       description: 'Public endpoint. Send the returned token as `Authorization: Bearer
-        <token>`.'
+        <token>`.
+
+
+        Repeated failures for the same account and client address are locked out
+
+        for a while (429).'
       operationId: create_access_token
       requestBody:
         content:
@@ -32,6 +37,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too many failed attempts; see `Retry-After`
         '422':
           description: Validation Error
           content:
@@ -114,6 +121,8 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '400':
           description: Current password is wrong, or the new one is unchanged
+        '429':
+          description: Too many wrong current passwords; see `Retry-After`
         '422':
           description: Validation Error
           content:

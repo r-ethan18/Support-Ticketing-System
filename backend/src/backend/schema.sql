@@ -121,3 +121,11 @@ CREATE TABLE IF NOT EXISTS asset_vendor (
 
 -- Superseded by asset_vendor: assignees now qualify through their vendor.
 DROP TABLE IF EXISTS assignee_category;
+
+-- Failed-login counters, shared by every replica. `key` is e.g. "login:<email>|<ip>".
+CREATE TABLE IF NOT EXISTS login_throttle (
+    key               text PRIMARY KEY,
+    failures          integer NOT NULL,
+    window_started_at timestamptz NOT NULL,
+    locked_until      timestamptz
+);

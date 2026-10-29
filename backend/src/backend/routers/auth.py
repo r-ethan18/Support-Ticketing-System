@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 
 from backend.accounts import PERSON_COLUMNS, create_person
@@ -12,6 +12,7 @@ from backend.schemas.auth import PasswordChange, TokenRequest, TokenResponse
 from backend.schemas.enums import Role
 from backend.schemas.people import Person, RegisterRequest
 from backend.security import encode_access_token, hash_password, verify_password
+from backend.throttle import ThrottleDep, login_keys
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -19,13 +20,24 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post(
     "/token",
     summary="Exchange credentials for an access token",
-    responses={401: UNAUTHORIZED[401]},
+    responses={
+        401: UNAUTHORIZED[401],
+        429: {"description": "Too many failed attempts; see `Retry-After`"},
+    },
 )
 async def create_access_token(
     body: TokenRequest,
+    request: Request,
     store: Annotated[CredentialStore, Depends(get_credential_store)],
+    throttle: ThrottleDep,
 ) -> TokenResponse:
-    """Public endpoint. Send the returned token as `Authorization: Bearer <token>`."""
+    """Public endpoint. Send the returned token as `Authorization: Bearer <token>`.
+
+    Repeated failures for the same account and client address are locked out
+    for a while (429).
+    """
+    keys = login_keys(request, body.email)
+    await throttle.check(keys)
     credential = await store.get_by_email(body.email)
     # Argon2 is CPU-bound; keep it off the event loop.
     password_ok = await run_in_threadpool(
@@ -34,11 +46,13 @@ async def create_access_token(
         credential.password_hash if credential else None,
     )
     if credential is None or not password_ok:
+        await throttle.record_failure(keys)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    await throttle.record_success(keys)
     token, expires_in = encode_access_token(credential.person_id, credential.role)
     return TokenResponse(access_token=token, expires_in=expires_in)
 
@@ -86,11 +100,14 @@ async def get_me(user: CurrentUserDep, pool: PoolDep) -> Person:
     responses={
         **UNAUTHORIZED,
         400: {"description": "Current password is wrong, or the new one is unchanged"},
+        429: {"description": "Too many wrong current passwords; see `Retry-After`"},
     },
 )
 async def change_password(
-    body: PasswordChange, user: CurrentUserDep, pool: PoolDep
+    body: PasswordChange, user: CurrentUserDep, pool: PoolDep, throttle: ThrottleDep
 ) -> None:
+    keys = [f"password:{user.id}"]
+    await throttle.check(keys)
     async with pool.connection() as conn:
         cur = await conn.execute(
             "SELECT password_hash FROM person_credential WHERE person_id = %s",
@@ -108,9 +125,11 @@ async def change_password(
     if not await run_in_threadpool(
         verify_password, body.current_password, current_hash
     ):
+        await throttle.record_failure(keys)
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect"
         )
+    await throttle.record_success(keys)
     if body.new_password == body.current_password:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
