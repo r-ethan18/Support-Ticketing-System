@@ -28,6 +28,8 @@ class InMemoryStore:
 @pytest.fixture(autouse=True)
 def _settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("JWT_SECRET", SECRET)
+    monkeypatch.setenv("ADMIN_EMAIL", "bootstrap-admin@example.com")
+    monkeypatch.setenv("ADMIN_PASSWORD", PASSWORD)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

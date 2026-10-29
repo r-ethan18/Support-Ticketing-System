@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.schemas.enums import Role
-from tests.conftest import login
+from tests.conftest import Seeder, login, login_as
 
 ADMINS = "/api/v1/admins"
 BODY = {
@@ -28,13 +28,7 @@ def test_non_admin_gets_403_even_with_invalid_body(client: TestClient) -> None:
     assert response.status_code == 403
 
 
-def test_admin_passes_gate(client: TestClient) -> None:
-    # Handler is still a skeleton: 501 means the gate and validation let us through.
-    response = client.post(ADMINS, json=BODY, headers=login(client, Role.admin))
-    assert response.status_code == 501
-
-
-def test_short_password_rejected(client: TestClient) -> None:
+def test_short_password_rejected(db_client: TestClient, seed: Seeder) -> None:
+    _, headers = login_as(db_client, seed, Role.admin)
     body = BODY | {"password": "short"}
-    response = client.post(ADMINS, json=body, headers=login(client, Role.admin))
-    assert response.status_code == 422
+    assert db_client.post(ADMINS, json=body, headers=headers).status_code == 422

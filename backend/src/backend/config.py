@@ -31,6 +31,9 @@ class Settings:
     jwt_secret: str
     access_token_ttl_seconds: int = 3600
     database: DatabaseSettings = DatabaseSettings()
+    # Only used to create the first admin when none exists.
+    admin_email: str = ""
+    admin_password: str = ""
 
 
 @lru_cache
@@ -57,4 +60,6 @@ def get_settings() -> Settings:
             user=os.environ.get("DB_USER", "sts"),
             password=os.environ.get("DB_PASSWORD", ""),
         ),
+        admin_email=os.environ.get("ADMIN_EMAIL", ""),
+        admin_password=os.environ.get("ADMIN_PASSWORD", ""),
     )

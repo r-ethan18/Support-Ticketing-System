@@ -22,6 +22,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET (>= 32 chars) in .env}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:?set ADMIN_EMAIL (first admin) in .env}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?set ADMIN_PASSWORD (first admin, >= 12 chars) in .env}
       - DB_HOST=db
       - DB_PORT=5432
       - DB_NAME=${POSTGRES_DB:-sts}
