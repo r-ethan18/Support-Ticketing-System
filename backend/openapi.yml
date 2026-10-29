@@ -1454,6 +1454,7 @@ paths:
       tags:
       - tickets
       summary: List a ticket's comments
+      description: Oldest first. Visible to everyone who can see the ticket.
       operationId: list_ticket_comments
       security:
       - AccessToken: []
@@ -1497,6 +1498,8 @@ paths:
       tags:
       - tickets
       summary: Comment on a ticket
+      description: 'The ticket''s chat: its requester, supervisors, current assignees
+        and admins can post. Closed tickets are read-only.'
       operationId: create_ticket_comment
       security:
       - AccessToken: []
@@ -1529,6 +1532,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Resource already exists
           content:
             application/json:
               schema:
@@ -2080,6 +2089,8 @@ components:
       properties:
         body:
           type: string
+          maxLength: 10000
+          minLength: 1
           title: Body
       type: object
       required:
