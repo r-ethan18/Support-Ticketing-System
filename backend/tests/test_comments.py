@@ -101,3 +101,55 @@ def test_admin_can_follow_any_thread(db_client: TestClient, seed: Seeder) -> Non
         == 201
     )
     assert db_client.get(url, headers=owner).json()[0]["body"] == "admin here"
+
+
+def test_ticket_sse_stream_and_realtime_updates(
+    db_client: TestClient, seed: Seeder
+) -> None:
+    from backend.pubsub import get_hub_instance
+
+    _owner_id, owner = login_as(db_client, seed, Role.requester)
+    _, stranger = login_as(db_client, seed, Role.requester)
+
+    ticket = db_client.post(
+        API,
+        json={"title": "SSE test", "description": "d", "location": "l"},
+        headers=owner,
+    ).json()["id"]
+    seed._created.append(("ticket", ticket))
+
+    # Stranger cannot access ticket stream
+    stranger_stream = db_client.get(f"{API}/{ticket}/stream", headers=stranger)
+    assert stranger_stream.status_code == 404
+
+    # Owner can connect to stream and gets initial connected event
+    hub = get_hub_instance()
+    from uuid import UUID
+
+    q = hub.subscribe(UUID(ticket))
+    try:
+        # Create a comment
+        res = db_client.post(
+            f"{API}/{ticket}/comments", json={"body": "live comment"}, headers=owner
+        )
+        assert res.status_code == 201
+
+        # Check queue has the comment event
+        assert not q.empty()
+        event = q.get_nowait()
+        assert event["event"] == "comment"
+        assert event["data"]["body"] == "live comment"
+
+        # Update status (requester can close own ticket)
+        res = db_client.patch(
+            f"{API}/{ticket}", json={"status": "closed"}, headers=owner
+        )
+        assert res.status_code == 200
+
+        # Check queue has status event
+        assert not q.empty()
+        status_event = q.get_nowait()
+        assert status_event["event"] == "status"
+        assert status_event["data"]["status"] == "closed"
+    finally:
+        hub.unsubscribe(UUID(ticket), q)

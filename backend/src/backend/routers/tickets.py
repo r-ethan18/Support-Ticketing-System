@@ -1,15 +1,20 @@
-from datetime import datetime
+import asyncio
+import json
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
 import psycopg.errors
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http
+from fastapi.responses import StreamingResponse
 from psycopg.rows import class_row
 
 from backend.auth import CurrentUserDep, require_roles
-from backend.db import PoolDep, fetch_page, like_pattern
+from backend.db import HubDep, PoolDep, fetch_page, like_pattern
 from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND
+from backend.pubsub import PubSubHub
 from backend.routers.deps import PaginationDep
 from backend.schemas.enums import (
     AttachmentKind,
@@ -194,7 +199,11 @@ REQUESTER_EDITABLE = {"title", "description", "location", "priority"}
     responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},
 )
 async def update_ticket(
-    ticket_id: UUID, body: TicketUpdate, user: CurrentUserDep, pool: PoolDep
+    ticket_id: UUID,
+    body: TicketUpdate,
+    user: CurrentUserDep,
+    pool: PoolDep,
+    hub: HubDep,
 ) -> Ticket:
     ticket = await get_visible_ticket(pool, ticket_id, user)
     changes = body.model_dump(exclude_none=True)
@@ -265,6 +274,19 @@ async def update_ticket(
         raise HTTPException(
             http.HTTP_422_UNPROCESSABLE_CONTENT, detail="Unknown assetId"
         ) from None
+    # Notify SSE subscribers if status changed.
+    if new_status and new_status is not ticket.status:
+        await hub.publish(
+            ticket_id,
+            {
+                "event": "status",
+                "data": {
+                    "ticketId": str(ticket_id),
+                    "status": new_status.value,
+                    "changedAt": datetime.now(UTC).isoformat(),
+                },
+            },
+        )
     return updated
 
 
@@ -527,7 +549,11 @@ async def list_ticket_comments(
     responses={**NOT_FOUND, **CONFLICT},
 )
 async def create_ticket_comment(
-    ticket_id: UUID, body: TicketCommentCreate, user: CurrentUserDep, pool: PoolDep
+    ticket_id: UUID,
+    body: TicketCommentCreate,
+    user: CurrentUserDep,
+    pool: PoolDep,
+    hub: HubDep,
 ) -> TicketComment:
     ticket = await get_visible_ticket(pool, ticket_id, user)
     if ticket.status is TicketStatus.closed:
@@ -543,6 +569,14 @@ async def create_ticket_comment(
         )
         comment = await cur.fetchone()
     assert comment is not None
+    # Notify all SSE subscribers watching this ticket.
+    await hub.publish(
+        ticket_id,
+        {
+            "event": "comment",
+            "data": json.loads(comment.model_dump_json(by_alias=True)),
+        },
+    )
     return comment
 
 
@@ -566,3 +600,62 @@ async def list_ticket_status_history(
             (ticket_id,),
         )
         return await cur.fetchall()
+
+
+# ---------------------------------------------------------------------------
+# SSE stream endpoint
+# ---------------------------------------------------------------------------
+
+
+async def _sse_generator(
+    ticket_id: UUID,
+    hub: PubSubHub,
+    heartbeat_secs: int = 25,
+) -> AsyncGenerator[str]:
+    """Yield SSE-formatted text chunks until the client disconnects."""
+    q = hub.subscribe(ticket_id)
+    try:
+        # Send an initial 'connected' ping so the browser EventSource doesn't
+        # stay in CONNECTING state while waiting for the first real event.
+        yield f'event: connected\ndata: {{"ticketId": "{ticket_id}"}}\n\n'
+        while True:
+            try:
+                event = await asyncio.wait_for(q.get(), timeout=heartbeat_secs)
+                payload = json.dumps(event["data"])
+                yield f"event: {event['event']}\ndata: {payload}\n\n"
+            except TimeoutError:
+                # Keep the connection alive; browsers expect at least one byte
+                # every ~30 s or they may time out.
+                yield ": heartbeat\n\n"
+    finally:
+        hub.unsubscribe(ticket_id, q)
+
+
+@router.get(
+    "/{ticket_id}/stream",
+    summary="SSE stream of live updates for a ticket",
+    description=(
+        "Server-Sent Events endpoint. Connect with `EventSource` (with an"
+        " Authorization header via a custom fetch). Emits `comment` events when"
+        " a new comment is posted and `status` events when the ticket status"
+        " changes. A `connected` event is sent immediately on connection, and"
+        " a `: heartbeat` comment every 25 s keeps the connection alive."
+    ),
+    response_class=StreamingResponse,
+    responses=NOT_FOUND,
+)
+async def stream_ticket(
+    ticket_id: UUID, user: CurrentUserDep, pool: PoolDep, hub: HubDep
+) -> StreamingResponse:
+    """Long-lived SSE connection scoped to a single ticket."""
+    # Enforce visibility: 404 / 403 as usual.
+    await get_visible_ticket(pool, ticket_id, user)
+    return StreamingResponse(
+        _sse_generator(ticket_id, hub),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable Nginx/Traefik response buffering
+            "Connection": "keep-alive",
+        },
+    )
