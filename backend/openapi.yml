@@ -2137,6 +2137,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tickets/{ticket_id}/stream:
+    get:
+      tags:
+      - tickets
+      summary: SSE stream of live updates for a ticket
+      description: 'Server-Sent Events endpoint. Connect with `EventSource` (with
+        an Authorization header via a custom fetch). Emits `comment` events when a
+        new comment is posted and `status` events when the ticket status changes.
+        A `connected` event is sent immediately on connection, and a `: heartbeat`
+        comment every 25 s keeps the connection alive.'
+      operationId: stream_ticket
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      responses:
+        '200':
+          description: Successful Response
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AdminCreate:

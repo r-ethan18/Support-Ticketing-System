@@ -14,7 +14,7 @@ import {
 	UploadCloud,
 	UserPlus,
 } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Avatar } from "../../components/common/Avatar";
 import { PriorityBadge, StatusBadge } from "../../components/common/Badge";
@@ -26,7 +26,8 @@ import { Select } from "../../components/common/Select";
 import { Skeleton } from "../../components/common/Skeleton";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
-import { ticketService } from "../../services/ticketService";
+import { useTicketStream } from "../../hooks/useTicketStream";
+import { isMockMode, ticketService } from "../../services/ticketService";
 import type {
 	Asset,
 	AttachmentKind,
@@ -74,6 +75,39 @@ export function TicketDetailPage() {
 
 	// Status update state
 	const [updatingStatus, setUpdatingStatus] = useState(false);
+	// Whether we have a live SSE connection (live-backend mode only).
+	const [isLive, setIsLive] = useState(false);
+
+	// Real-time SSE callbacks ---------------------------------------------------
+	const handleStreamComment = useCallback((newComment: TicketComment) => {
+		setIsLive(true);
+		setComments((prev) => {
+			// Deduplicate: the local optimistic update already added this comment
+			// if the current user posted it, so skip duplicates by id.
+			if (prev.some((c) => c.id === newComment.id)) return prev;
+			return [...prev, newComment];
+		});
+	}, []);
+
+	const handleStreamStatus = useCallback(
+		(ticketId: string, status: TicketStatus, _changedAt: string) => {
+			setIsLive(true);
+			setTicket((prev) =>
+				prev && prev.id === ticketId ? { ...prev, status } : prev,
+			);
+		},
+		[],
+	);
+
+	useTicketStream(id, {
+		onComment: handleStreamComment,
+		onStatus: handleStreamStatus,
+	});
+
+	// Mark as live once the SSE hook connects in live mode.
+	useEffect(() => {
+		if (!isMockMode()) setIsLive(true);
+	}, []);
 
 	useEffect(() => {
 		async function loadTicketData() {
@@ -194,9 +228,11 @@ export function TicketDetailPage() {
 				user?.id || "p-user-1",
 			);
 			setTicket(updated);
-			// Refresh history
-			const freshHistory = await ticketService.listStatusHistory(ticket.id);
-			setHistory(freshHistory);
+			// In mock mode refresh history manually; in live mode SSE pushes the update.
+			if (isMockMode()) {
+				const freshHistory = await ticketService.listStatusHistory(ticket.id);
+				setHistory(freshHistory);
+			}
 			showToast(`Status updated to ${newStatus.toUpperCase()}`, "success");
 		} catch (_err) {
 			showToast("Failed to update status", "error");
@@ -333,6 +369,15 @@ export function TicketDetailPage() {
 							>
 								<MessageSquare size={16} />
 								<span>Conversation ({comments.length})</span>
+								{isLive && (
+									<span
+										className="sse-live-badge"
+										title="Real-time updates active"
+									>
+										<span className="sse-live-dot" />
+										LIVE
+									</span>
+								)}
 							</button>
 							<button
 								type="button"
