@@ -13,6 +13,29 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: sts
+          POSTGRES_USER: sts
+          POSTGRES_PASSWORD: sts-ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sts -d sts"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The tests create and remove their own rows; the app applies schema.sql on
+      # startup. REQUIRE_DB turns "database unreachable" into a failure, not a skip.
+      REQUIRE_DB: "1"
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_NAME: sts
+      DB_USER: sts
+      DB_PASSWORD: sts-ci-password
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
