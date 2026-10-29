@@ -1,5 +1,7 @@
 from uuid import UUID
 
+from pydantic import Field
+
 from backend.schemas.base import CamelModel, Page
 
 # NOTE: the ER diagram draws VENDOR, DEPARTMENT, CATEGORY and ASSET but lists no
@@ -43,3 +45,15 @@ class CategoryPage(Page[Category]):
 
 class AssetPage(Page[Asset]):
     pass
+
+
+class VendorCreate(CamelModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class DepartmentCreate(CamelModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class CategoryCreate(CamelModel):
+    name: str = Field(min_length=1, max_length=200)

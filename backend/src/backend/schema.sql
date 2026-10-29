@@ -112,3 +112,8 @@ CREATE TABLE IF NOT EXISTS ticket_comment (
 );
 
 CREATE INDEX IF NOT EXISTS ticket_comment_ticket_idx ON ticket_comment (ticket_id, created_at);
+
+-- Names are how admins and supervisors tell these apart, so keep them unique.
+CREATE UNIQUE INDEX IF NOT EXISTS department_name_lower_key ON department (lower(name));
+CREATE UNIQUE INDEX IF NOT EXISTS vendor_name_lower_key ON vendor (lower(name));
+CREATE UNIQUE INDEX IF NOT EXISTS category_name_lower_key ON category (lower(name));
