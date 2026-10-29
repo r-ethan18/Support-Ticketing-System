@@ -38,6 +38,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/register:
+    post:
+      tags:
+      - auth
+      summary: Create a requester account
+      description: Public self-service sign-up. Always creates a `requester`.
+      operationId: register
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Person'
+        '409':
+          description: Resource already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/auth/me:
     get:
       tags:
@@ -109,7 +141,7 @@ paths:
     get:
       tags:
       - people
-      summary: List people
+      summary: List people (supervisor or admin)
       operationId: list_people
       security:
       - AccessToken: []
@@ -191,6 +223,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - people
+      summary: Create a supervisor or assignee (admin only)
+      operationId: create_staff
+      security:
+      - AccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Person'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Resource already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -228,6 +310,62 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - people
+      summary: Delete a supervisor or assignee (admin only)
+      description: Requesters and admins cannot be deleted here. An assignee who appears
+        in a ticket's assignment history cannot be deleted (409).
+      operationId: delete_person
+      security:
+      - AccessToken: []
+      parameters:
+      - name: person_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Person Id
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Resource already exists
           content:
             application/json:
               schema:
@@ -272,6 +410,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Caller's role may not do this
           content:
             application/json:
               schema:
@@ -1596,6 +1740,32 @@ components:
       - limit
       - offset
       title: PersonPage
+    RegisterRequest:
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: Name
+        email:
+          type: string
+          minLength: 3
+          title: Email
+        phone:
+          type: string
+          title: Phone
+        password:
+          type: string
+          maxLength: 128
+          minLength: 12
+          title: Password
+      type: object
+      required:
+      - name
+      - email
+      - phone
+      - password
+      title: RegisterRequest
+      description: Self-service sign-up; always creates a `requester`.
     Role:
       type: string
       enum:
@@ -1610,6 +1780,56 @@ components:
       - asc
       - desc
       title: SortOrder
+    StaffCreate:
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: Name
+        email:
+          type: string
+          minLength: 3
+          title: Email
+        phone:
+          type: string
+          title: Phone
+        password:
+          type: string
+          maxLength: 128
+          minLength: 12
+          title: Password
+        role:
+          $ref: '#/components/schemas/Role'
+        vendorId:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Vendorid
+          description: Employer, for assignees only
+        departmentId:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Departmentid
+          description: Required for supervisors, not allowed otherwise
+        categoryIds:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Categoryids
+          description: Categories an assignee specialises in (assignees only)
+      type: object
+      required:
+      - name
+      - email
+      - phone
+      - password
+      - role
+      title: StaffCreate
+      description: Admin-created supervisor or assignee account.
     Ticket:
       properties:
         id:

@@ -31,10 +31,6 @@ def create_app(*, with_database: bool = True) -> FastAPI:
         generate_unique_id_function=_operation_id,
         lifespan=lifespan if with_database else None,
     )
-    # TODO(first-run): POST /admins needs an admin token, so the first admin cannot
-    # be created through the API. On startup, if no admin exists, create one from
-    # ADMIN_EMAIL / ADMIN_PASSWORD (and refuse to start if they are unset). At least
-    # one admin account must exist after first run. Postgres layer: backend.db.
     app.include_router(api_router)
     return app
 

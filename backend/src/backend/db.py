@@ -10,6 +10,7 @@ from psycopg.rows import class_row
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
+from backend.accounts import ensure_admin
 from backend.config import get_settings
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
@@ -29,6 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await pool.open(wait=True, timeout=30)
     try:
         await init_schema(pool)
+        await ensure_admin(pool)
         app.state.db_pool = pool
         yield
     finally:
