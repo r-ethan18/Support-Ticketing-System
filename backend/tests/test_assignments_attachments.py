@@ -265,7 +265,7 @@ def test_deleting_the_last_assignee_reopens_the_ticket(
     assert history[-1]["toStatus"] == "open"
 
 
-def test_deleting_a_requester_deletes_their_tickets(
+def test_deleting_a_requester_keeps_open_tickets_without_an_author(
     scene: Scene, db_client: TestClient
 ) -> None:
     person, _ = scene.assignee()
@@ -274,7 +274,34 @@ def test_deleting_a_requester_deletes_their_tickets(
     response = db_client.delete(f"/api/v1/people/{scene.owner_id}", headers=scene.admin)
 
     assert response.status_code == 204
-    assert db_client.get(scene.url, headers=scene.admin).status_code == 404
+    ticket = db_client.get(scene.url, headers=scene.admin).json()
+    assert ticket["requesterId"] is None
+    assert ticket["status"] == "assigned"
+
+
+def test_deleting_a_requester_removes_only_untouched_closed_tickets(
+    scene: Scene, db_client: TestClient
+) -> None:
+    def closed_ticket() -> str:
+        ticket = db_client.post(API, json=NEW, headers=scene.owner).json()["id"]
+        scene.seed._created.append(("ticket", ticket))
+        return ticket
+
+    quiet, discussed = closed_ticket(), closed_ticket()
+    db_client.post(
+        f"{API}/{discussed}/comments", json={"body": "on it"}, headers=scene.sup
+    )
+    for ticket in (quiet, discussed):
+        db_client.patch(
+            f"{API}/{ticket}", json={"status": "closed"}, headers=scene.owner
+        )
+
+    db_client.delete(f"/api/v1/people/{scene.owner_id}", headers=scene.admin)
+
+    assert db_client.get(f"{API}/{quiet}", headers=scene.admin).status_code == 404
+    kept = db_client.get(f"{API}/{discussed}", headers=scene.admin)
+    assert kept.status_code == 200
+    assert kept.json()["requesterId"] is None
 
 
 def test_deleting_a_supervisor_clears_ticket_supervisor(
@@ -309,7 +336,7 @@ def test_changing_an_assignees_role_takes_them_off_their_tickets(
 def test_deleting_a_vendor_unassigns_and_demotes_its_technicians(
     scene: Scene, db_client: TestClient
 ) -> None:
-    person, _ = scene.assignee()
+    person, _ = scene.assignee(responsible=False)
     scene.assign(person)
     vendor = db_client.get(f"/api/v1/people/{person}", headers=scene.admin).json()[
         "vendorId"
@@ -328,3 +355,14 @@ def test_deleting_a_vendor_unassigns_and_demotes_its_technicians(
         db_client.get(f"/api/v1/vendors/{vendor}", headers=scene.admin).status_code
         == 404
     )
+
+
+def test_cannot_delete_a_vendor_responsible_for_assets(
+    scene: Scene, db_client: TestClient
+) -> None:
+    person, _ = scene.assignee()  # linked to the scene's asset
+    vendor = db_client.get(f"/api/v1/people/{person}", headers=scene.admin).json()[
+        "vendorId"
+    ]
+    response = db_client.delete(f"/api/v1/vendors/{vendor}", headers=scene.admin)
+    assert response.status_code == 409

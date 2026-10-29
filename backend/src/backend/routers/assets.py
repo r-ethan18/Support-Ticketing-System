@@ -174,7 +174,7 @@ async def update_asset(
     "/{asset_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete an asset (supervisor or admin)",
-    description="Tickets on the asset stay, without an asset (back in triage).",
+    description="Fails with 409 while tickets refer to the asset.",
     dependencies=[supervisor_only],
     responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},
 )

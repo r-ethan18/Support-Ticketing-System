@@ -73,8 +73,8 @@ async def create_department(body: DepartmentCreate, pool: PoolDep) -> Department
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a department (admin only)",
     description=(
-        "Its assets are deleted too (their tickets stay, without an asset) and its"
-        " supervisors become plain requesters."
+        "Fails with 409 while the department owns assets. Its supervisors become"
+        " plain requesters."
     ),
     dependencies=[Depends(require_roles(Role.admin))],
     responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},

@@ -74,9 +74,9 @@ async def create_vendor(body: VendorCreate, pool: PoolDep) -> Vendor:
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a vendor (admin only)",
     description=(
-        "Its technicians are taken off their tickets (a ticket left with nobody"
-        " reopens) and become plain requesters; its asset responsibilities are"
-        " dropped."
+        "Fails with 409 while the vendor is responsible for any asset. Its"
+        " technicians are taken off their tickets (a ticket left with nobody"
+        " reopens) and become plain requesters."
     ),
     dependencies=[Depends(require_roles(Role.admin))],
     responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},

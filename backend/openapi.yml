@@ -440,11 +440,12 @@ paths:
       tags:
       - people
       summary: Delete a person (admin only)
-      description: Admin accounts cannot be deleted here. Deleting a person also deletes
-        the tickets they requested. An assignee is first taken off the tickets they
-        are on (a ticket left with nobody goes back to `open`). A supervisor's tickets
-        lose their supervisor. Comments, uploads, history and past assignments are
-        kept, with the person blanked.
+      description: 'Admin accounts cannot be deleted here. Nothing other people are
+        involved in is destroyed: the person''s tickets, comments, uploads, history
+        and past assignments stay, with the person shown as a deleted user (`null`
+        id). Only closed tickets nobody else touched are removed. An assignee is first
+        taken off the tickets they are on (a ticket left with nobody goes back to
+        `open`), and a supervisor''s tickets lose their supervisor.'
       operationId: delete_person
       security:
       - AccessToken: []
@@ -639,9 +640,9 @@ paths:
       tags:
       - vendors
       summary: Delete a vendor (admin only)
-      description: Its technicians are taken off their tickets (a ticket left with
-        nobody reopens) and become plain requesters; its asset responsibilities are
-        dropped.
+      description: Fails with 409 while the vendor is responsible for any asset. Its
+        technicians are taken off their tickets (a ticket left with nobody reopens)
+        and become plain requesters.
       operationId: delete_vendor
       security:
       - AccessToken: []
@@ -832,8 +833,8 @@ paths:
       tags:
       - departments
       summary: Delete a department (admin only)
-      description: Its assets are deleted too (their tickets stay, without an asset)
-        and its supervisors become plain requesters.
+      description: Fails with 409 while the department owns assets. Its supervisors
+        become plain requesters.
       operationId: delete_department
       security:
       - AccessToken: []
@@ -1290,7 +1291,7 @@ paths:
       tags:
       - assets
       summary: Delete an asset (supervisor or admin)
-      description: Tickets on the asset stay, without an asset (back in triage).
+      description: Fails with 409 while tickets refer to the asset.
       operationId: delete_asset
       security:
       - AccessToken: []
@@ -2696,9 +2697,12 @@ components:
           - type: 'null'
           title: Closedat
         requesterId:
-          type: string
-          format: uuid
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
           title: Requesterid
+          description: Null once the requester's account is deleted
         assetId:
           anyOf:
           - type: string
@@ -2720,7 +2724,6 @@ components:
       - priority
       - status
       - createdAt
-      - requesterId
       title: Ticket
     TicketAssignment:
       properties:
