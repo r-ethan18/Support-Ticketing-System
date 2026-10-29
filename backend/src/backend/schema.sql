@@ -91,3 +91,14 @@ CREATE INDEX IF NOT EXISTS ticket_assignment_ticket_idx ON ticket_assignment (ti
 -- A person is "currently assigned" at most once per ticket.
 CREATE UNIQUE INDEX IF NOT EXISTS ticket_assignment_active_key
     ON ticket_assignment (ticket_id, assignee_id) WHERE unassigned_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS ticket_attachment (
+    id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticket_id      uuid NOT NULL REFERENCES ticket (id) ON DELETE CASCADE,
+    uploaded_by_id uuid NOT NULL REFERENCES person (id),
+    kind           text NOT NULL CHECK (kind IN ('issue_evidence', 'completion_proof')),
+    storage_url    text NOT NULL,
+    uploaded_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ticket_attachment_ticket_idx ON ticket_attachment (ticket_id);

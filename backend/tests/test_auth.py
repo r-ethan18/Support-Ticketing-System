@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from backend.schemas.enums import Role
-from tests.conftest import PASSWORD, login
+from tests.conftest import PASSWORD, Seeder, login, login_as
 
 TICKET = "/api/v1/tickets/00000000-0000-0000-0000-000000000000"
 
@@ -57,31 +57,31 @@ def test_valid_token_passes_auth(client: TestClient) -> None:
     assert response.status_code == 501
 
 
-def test_supervisor_only_route(client: TestClient) -> None:
+def test_supervisor_only_route(db_client: TestClient, seed: Seeder) -> None:
     body = {"assigneeId": "00000000-0000-0000-0000-000000000001"}
     url = f"{TICKET}/assignments"
-    as_requester = client.post(url, json=body, headers=login(client, Role.requester))
-    as_assignee = client.post(url, json=body, headers=login(client, Role.assignee))
-    as_supervisor = client.post(url, json=body, headers=login(client, Role.supervisor))
-    assert as_requester.status_code == 403
-    assert as_assignee.status_code == 403
-    assert as_supervisor.status_code == 501
+    statuses = {
+        role: db_client.post(
+            url, json=body, headers=login_as(db_client, seed, role)[1]
+        ).status_code
+        for role in (Role.requester, Role.assignee, Role.supervisor)
+    }
+    # 404 (no such ticket) means the role gate let the supervisor through.
+    assert statuses == {
+        Role.requester: 403,
+        Role.assignee: 403,
+        Role.supervisor: 404,
+    }
 
 
-def test_admin_passes_every_role_gate(client: TestClient) -> None:
-    admin = login(client, Role.admin)
-    assert (
-        client.post(
-            f"{TICKET}/assignments",
-            json={"assigneeId": "00000000-0000-0000-0000-000000000001"},
-            headers=admin,
-        ).status_code
-        == 501
+def test_admin_passes_every_role_gate(db_client: TestClient, seed: Seeder) -> None:
+    _, admin = login_as(db_client, seed, Role.admin)
+    assignment = db_client.post(
+        f"{TICKET}/assignments",
+        json={"assigneeId": "00000000-0000-0000-0000-000000000001"},
+        headers=admin,
     )
-    assert (
-        client.delete(
-            f"{TICKET}/assignments/00000000-0000-0000-0000-000000000002",
-            headers=admin,
-        ).status_code
-        == 501
+    unassign = db_client.delete(
+        f"{TICKET}/assignments/00000000-0000-0000-0000-000000000002", headers=admin
     )
+    assert assignment.status_code == unassign.status_code == 404

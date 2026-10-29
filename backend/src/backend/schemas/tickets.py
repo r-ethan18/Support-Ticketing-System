@@ -1,6 +1,8 @@
 from datetime import datetime
 from uuid import UUID
 
+from pydantic import Field
+
 from backend.schemas.base import CamelModel, Page
 from backend.schemas.enums import AttachmentKind, TicketPriority, TicketStatus
 
@@ -66,7 +68,7 @@ class TicketAttachmentCreate(CamelModel):
     # PLACEHOLDER: assumes the file is already in storage and the client
     # registers its URL. Swap for multipart / presigned upload if preferred.
     kind: AttachmentKind
-    storage_url: str
+    storage_url: str = Field(min_length=1, max_length=2048)
 
 
 class TicketComment(CamelModel):

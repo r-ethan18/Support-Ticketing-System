@@ -100,7 +100,11 @@ class Seeder:
         return person_id
 
     def cleanup(self) -> None:
-        for table, row_id in reversed(self._created):
+        # Tickets reference people regardless of which was created first.
+        newest_first = list(reversed(self._created))
+        tickets = [row for row in newest_first if row[0] == "ticket"]
+        rest = [row for row in newest_first if row[0] != "ticket"]
+        for table, row_id in tickets + rest:
             self.conn.execute(f"DELETE FROM {table} WHERE id = %s", (row_id,))
 
 

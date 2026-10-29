@@ -1227,6 +1227,9 @@ paths:
       tags:
       - tickets
       summary: Assign a ticket to an assignee (supervisor or admin)
+      description: Several assignees can work on one ticket. Once the ticket has an
+        asset, only assignees specialising in the asset's category can be assigned.
+        Assigning an `open` ticket moves it to `assigned`.
       operationId: create_ticket_assignment
       security:
       - AccessToken: []
@@ -1269,6 +1272,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Resource already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1281,6 +1290,7 @@ paths:
       - tickets
       summary: Unassign (supervisor or admin)
       description: Does not delete the row; sets `unassignedAt` so history is preserved.
+        Removing the last assignee of an `assigned` ticket moves it back to `open`.
       operationId: delete_ticket_assignment
       security:
       - AccessToken: []
@@ -1382,8 +1392,9 @@ paths:
       tags:
       - tickets
       summary: Add an attachment to a ticket
-      description: '`issue_evidence` is added by the requester, `completion_proof`
-        by the assignee.'
+      description: '`issue_evidence` is added by the ticket''s requester, `completion_proof`
+        by an assignee currently assigned to it. Admins can add either. Closed tickets
+        take no new attachments.'
       operationId: create_ticket_attachment
       security:
       - AccessToken: []
@@ -1422,6 +1433,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
           description: Caller's role may not do this
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Resource already exists
           content:
             application/json:
               schema:
@@ -2022,6 +2039,8 @@ components:
           $ref: '#/components/schemas/AttachmentKind'
         storageUrl:
           type: string
+          maxLength: 2048
+          minLength: 1
           title: Storageurl
       type: object
       required:
