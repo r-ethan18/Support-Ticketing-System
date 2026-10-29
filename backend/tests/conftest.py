@@ -1,11 +1,14 @@
 from collections.abc import Iterator
-from uuid import uuid4
+from typing import Any
+from uuid import UUID, uuid4
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.config import get_settings
 from backend.credentials import Credential, get_credential_store
+from backend.db import SCHEMA_PATH
 from backend.main import create_app
 from backend.schemas.enums import Role
 from backend.security import hash_password
@@ -55,3 +58,83 @@ def login(client: TestClient, role: Role) -> dict[str, str]:
     )
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['accessToken']}"}
+
+
+class Seeder:
+    """Inserts rows into the real database and removes them again on teardown.
+
+    Rows are deleted individually (newest first) rather than truncating, so the
+    tests are safe to run against a database that holds other data.
+    """
+
+    def __init__(self, conn: psycopg.Connection) -> None:
+        self.conn = conn
+        self._created: list[tuple[str, UUID]] = []
+
+    def insert(self, table: str, **values: Any) -> UUID:
+        columns = ", ".join(values)
+        marks = ", ".join(["%s"] * len(values))
+        row = self.conn.execute(
+            f"INSERT INTO {table} ({columns}) VALUES ({marks}) RETURNING id",
+            list(values.values()),
+        ).fetchone()
+        assert row is not None
+        self._created.append((table, row[0]))
+        return row[0]
+
+    def person(self, role: Role, **extra: Any) -> UUID:
+        person_id = self.insert(
+            "person",
+            name=f"{role} {uuid4().hex[:6]}",
+            email=f"{uuid4().hex}@example.com",
+            phone="+10000000000",
+            role=role.value,
+            **extra,
+        )
+        self.conn.execute(
+            "INSERT INTO person_credential (person_id, password_hash) VALUES (%s, %s)",
+            (person_id, hash_password(PASSWORD)),
+        )
+        return person_id
+
+    def cleanup(self) -> None:
+        for table, row_id in reversed(self._created):
+            self.conn.execute(f"DELETE FROM {table} WHERE id = %s", (row_id,))
+
+
+@pytest.fixture
+def seed() -> Iterator[Seeder]:
+    try:
+        conn = psycopg.connect(
+            get_settings().database.conninfo, connect_timeout=2, autocommit=True
+        )
+    except psycopg.OperationalError:
+        pytest.skip("Postgres not reachable; set DB_* to run database tests")
+    with conn:
+        conn.execute(SCHEMA_PATH.read_text())
+        seeder = Seeder(conn)
+        try:
+            yield seeder
+        finally:
+            seeder.cleanup()
+
+
+@pytest.fixture
+def db_client(seed: Seeder) -> Iterator[TestClient]:
+    with TestClient(create_app()) as c:
+        yield c
+
+
+def login_as(
+    client: TestClient, seed: Seeder, role: Role, **extra: Any
+) -> tuple[UUID, dict[str, str]]:
+    """Create a `role` person in Postgres and log in; return `(id, headers)`."""
+    person_id = seed.person(role, **extra)
+    email = seed.conn.execute(
+        "SELECT email FROM person WHERE id = %s", (person_id,)
+    ).fetchone()[0]
+    response = client.post(
+        "/api/v1/auth/token", json={"email": email, "password": PASSWORD}
+    )
+    assert response.status_code == 200, response.text
+    return person_id, {"Authorization": f"Bearer {response.json()['accessToken']}"}
