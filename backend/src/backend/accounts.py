@@ -25,23 +25,19 @@ async def create_person(
     phone: str,
     password: str,
     role: Role,
-    vendor_id: UUID | None = None,
-    department_id: UUID | None = None,
-    category_ids: list[UUID] | None = None,
 ) -> UUID:
-    """Insert a person, their credential and category links in one transaction.
+    """Insert a person and their credential in one transaction.
 
-    Raises 409 if the email is taken and 422 if a referenced vendor, department
-    or category does not exist.
+    Raises 409 if the email is taken.
     """
     # Argon2 is CPU-bound; keep it off the event loop.
     password_hash = await run_in_threadpool(hash_password, password)
     try:
         async with pool.connection() as conn:
             cur = await conn.execute(
-                "INSERT INTO person (name, email, phone, role, vendor_id, department_id)"
-                " VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                (name, email, phone, role.value, vendor_id, department_id),
+                "INSERT INTO person (name, email, phone, role)"
+                " VALUES (%s, %s, %s, %s) RETURNING id",
+                (name, email, phone, role.value),
             )
             row = await cur.fetchone()
             assert row is not None
@@ -51,20 +47,9 @@ async def create_person(
                 " VALUES (%s, %s)",
                 (person_id, password_hash),
             )
-            for category_id in dict.fromkeys(category_ids or []):
-                await conn.execute(
-                    "INSERT INTO assignee_category (person_id, category_id)"
-                    " VALUES (%s, %s)",
-                    (person_id, category_id),
-                )
     except psycopg.errors.UniqueViolation:
         raise HTTPException(
             status.HTTP_409_CONFLICT, detail="Email is already registered"
-        ) from None
-    except psycopg.errors.ForeignKeyViolation:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Unknown vendor, department or category",
         ) from None
     return person_id
 

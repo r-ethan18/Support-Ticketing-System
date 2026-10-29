@@ -235,3 +235,20 @@ def test_cannot_delete_assignee_with_history(
     scene.assign(person)
     response = db_client.delete(f"/api/v1/people/{person}", headers=scene.admin)
     assert response.status_code == 409
+
+
+def test_cannot_change_role_of_assignee_with_active_assignment(
+    scene: Scene, db_client: TestClient
+) -> None:
+    person, _ = scene.assignee()
+    assignment = scene.assign(person).json()["id"]
+    url = f"/api/v1/people/{person}/role"
+    assert (
+        db_client.put(url, json={"role": "requester"}, headers=scene.admin).status_code
+        == 409
+    )
+    db_client.delete(f"{scene.url}/assignments/{assignment}", headers=scene.sup)
+    assert (
+        db_client.put(url, json={"role": "requester"}, headers=scene.admin).status_code
+        == 200
+    )

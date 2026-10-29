@@ -2,17 +2,15 @@ from typing import Annotated
 from uuid import UUID
 
 import psycopg.errors
-import psycopg.rows
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from backend.accounts import PERSON_COLUMNS, create_person
+from backend.accounts import PERSON_COLUMNS
 from backend.auth import CurrentUserDep, require_roles
 from backend.db import PoolDep, fetch_or_404, fetch_page, like_pattern
 from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND
 from backend.routers.deps import PaginationDep
-from backend.schemas.assets import Category
 from backend.schemas.enums import Role
-from backend.schemas.people import Person, PersonPage, StaffCreate
+from backend.schemas.people import Person, PersonPage, RoleAssignment
 
 router = APIRouter(prefix="/people", tags=["people"])
 
@@ -31,13 +29,6 @@ async def list_people(
     role: Annotated[Role | None, Query()] = None,
     vendor_id: Annotated[UUID | None, Query(alias="vendorId")] = None,
     department_id: Annotated[UUID | None, Query(alias="departmentId")] = None,
-    category_id: Annotated[
-        UUID | None,
-        Query(
-            alias="categoryId",
-            description="Only assignees specialising in this category",
-        ),
-    ] = None,
     q: Annotated[str | None, Query(description="Match on name or email")] = None,
 ) -> PersonPage:
     where: list[str] = []
@@ -51,11 +42,6 @@ async def list_people(
     if department_id:
         where.append("department_id = %s")
         params.append(department_id)
-    if category_id:
-        where.append(
-            "id IN (SELECT person_id FROM assignee_category WHERE category_id = %s)"
-        )
-        params.append(category_id)
     if q:
         where.append("(name ILIKE %s OR email ILIKE %s)")
         params += [like_pattern(q)] * 2
@@ -72,25 +58,56 @@ async def list_people(
     return PersonPage(items=items, total=total, limit=page.limit, offset=page.offset)
 
 
-@router.post(
-    "",
-    status_code=status.HTTP_201_CREATED,
-    summary="Create a supervisor or assignee (admin only)",
+@router.put(
+    "/{person_id}/role",
+    summary="Assign a person's role (admin only)",
+    description=(
+        "Everyone signs up as a `requester`; an admin promotes them. A `supervisor`"
+        " needs a `departmentId`; an `assignee` (a vendor's technician) needs a"
+        " `vendorId`. Setting `requester` clears both. Admin accounts are created"
+        " with `POST /admins` and their role cannot be changed here. The person's"
+        " current access token keeps its old role until it expires."
+    ),
     dependencies=[Depends(require_roles(Role.admin))],
-    responses={**FORBIDDEN, **CONFLICT},
+    responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},
 )
-async def create_staff(body: StaffCreate, pool: PoolDep) -> Person:
-    person_id = await create_person(
+async def assign_role(person_id: UUID, body: RoleAssignment, pool: PoolDep) -> Person:
+    person = await fetch_or_404(
         pool,
-        name=body.name,
-        email=body.email,
-        phone=body.phone,
-        password=body.password,
-        role=body.role,
-        vendor_id=body.vendor_id,
-        department_id=body.department_id,
-        category_ids=body.category_ids,
+        Person,
+        f"SELECT {PERSON_COLUMNS} FROM person WHERE id = %s",
+        [person_id],
+        "Person",
     )
+    if person.role is Role.admin:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail="An admin's role cannot be changed"
+        )
+    try:
+        async with pool.connection() as conn:
+            if person.role is Role.assignee and (
+                body.role is not Role.assignee or body.vendor_id != person.vendor_id
+            ):
+                cur = await conn.execute(
+                    "SELECT 1 FROM ticket_assignment"
+                    " WHERE assignee_id = %s AND unassigned_at IS NULL LIMIT 1",
+                    (person_id,),
+                )
+                if await cur.fetchone():
+                    raise HTTPException(
+                        status.HTTP_409_CONFLICT,
+                        detail="Unassign this person from their tickets first",
+                    )
+            await conn.execute(
+                "UPDATE person SET role = %s, department_id = %s, vendor_id = %s"
+                " WHERE id = %s",
+                (body.role.value, body.department_id, body.vendor_id, person_id),
+            )
+    except psycopg.errors.ForeignKeyViolation:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Unknown vendorId or departmentId",
+        ) from None
     return await fetch_or_404(
         pool,
         Person,
@@ -166,25 +183,3 @@ async def delete_person(person_id: UUID, pool: PoolDep) -> None:
             status.HTTP_409_CONFLICT,
             detail="Person is referenced by existing tickets and cannot be deleted",
         ) from None
-
-
-@router.get(
-    "/{person_id}/categories",
-    summary="List the categories an assignee specialises in",
-    responses={**NOT_FOUND, **FORBIDDEN},
-)
-async def list_person_categories(
-    person_id: UUID, user: CurrentUserDep, pool: PoolDep
-) -> list[Category]:
-    await _visible_person(person_id, user, pool)
-    async with (
-        pool.connection() as conn,
-        conn.cursor(row_factory=psycopg.rows.class_row(Category)) as cur,
-    ):
-        await cur.execute(
-            "SELECT c.id, c.name FROM category c"
-            " JOIN assignee_category ac ON ac.category_id = c.id"
-            " WHERE ac.person_id = %s ORDER BY c.name, c.id",
-            (person_id,),
-        )
-        return await cur.fetchall()

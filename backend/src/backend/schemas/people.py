@@ -33,36 +33,25 @@ class RegisterRequest(CamelModel):
     password: str = Field(min_length=12, max_length=128)
 
 
-class StaffCreate(CamelModel):
-    """Admin-created supervisor or assignee account."""
+class RoleAssignment(CamelModel):
+    """What an admin sets on an existing person."""
 
-    name: str = Field(min_length=1)
-    email: str = Field(min_length=3)
-    phone: str
-    password: str = Field(min_length=12, max_length=128)
     role: Role
     vendor_id: UUID | None = Field(
-        default=None, description="Employer, for assignees only"
+        default=None, description="Employer; required for assignees"
     )
     department_id: UUID | None = Field(
-        default=None, description="Required for supervisors, not allowed otherwise"
-    )
-    category_ids: list[UUID] = Field(
-        default_factory=list,
-        description="Categories an assignee specialises in (assignees only)",
+        default=None, description="Required for supervisors"
     )
 
     @model_validator(mode="after")
-    def _check_role_fields(self) -> StaffCreate:
-        if self.role not in (Role.supervisor, Role.assignee):
-            raise ValueError("role must be 'supervisor' or 'assignee'")
-        if self.role is Role.supervisor:
-            if self.department_id is None:
-                raise ValueError("a supervisor needs a departmentId")
-            if self.vendor_id is not None or self.category_ids:
-                raise ValueError("vendorId and categoryIds are for assignees only")
-        elif self.department_id is not None:
-            raise ValueError("departmentId is for supervisors only")
+    def _check_role_fields(self) -> RoleAssignment:
+        if self.role is Role.admin:
+            raise ValueError("use POST /admins to create admins")
+        if (self.role is Role.supervisor) != (self.department_id is not None):
+            raise ValueError("departmentId is required for, and only for, supervisors")
+        if (self.role is Role.assignee) != (self.vendor_id is not None):
+            raise ValueError("vendorId is required for, and only for, assignees")
         return self
 
 
