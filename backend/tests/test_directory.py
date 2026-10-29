@@ -58,11 +58,42 @@ def test_non_admins_forbidden(
     )
 
 
-def test_cannot_delete_department_in_use(db_client: TestClient, seed: Seeder) -> None:
+def test_deleting_a_department_removes_assets_and_demotes_supervisors(
+    db_client: TestClient, seed: Seeder
+) -> None:
+    _, admin = login_as(db_client, seed, Role.admin)
+    dept = seed.insert("department", name=f"D {uuid4().hex[:8]}")
+    cat = seed.insert("category", name=f"C {uuid4().hex[:8]}")
+    asset = seed.insert("asset", name="pump", department_id=dept, category_id=cat)
+    sup_id, _ = login_as(db_client, seed, Role.supervisor, department_id=dept)
+    _, owner = login_as(db_client, seed, Role.requester)
+    ticket = db_client.post(
+        "/api/v1/tickets",
+        json={"title": "t", "description": "d", "location": "l"},
+        headers=owner,
+    ).json()["id"]
+    seed._created.append(("ticket", ticket))
+    seed.conn.execute(
+        "UPDATE ticket SET asset_id = %s, supervisor_id = %s WHERE id = %s",
+        (asset, sup_id, ticket),
+    )
+
+    assert (
+        db_client.delete(f"{API}/departments/{dept}", headers=admin).status_code == 204
+    )
+
+    person = db_client.get(f"/api/v1/people/{sup_id}", headers=admin).json()
+    assert person["role"] == "requester"
+    assert person["departmentId"] is None
+    after = db_client.get(f"/api/v1/tickets/{ticket}", headers=admin).json()
+    assert after["assetId"] is None
+    assert after["supervisorId"] is None
+    assert db_client.get(f"/api/v1/assets/{asset}", headers=admin).status_code == 404
+
+
+def test_cannot_delete_category_in_use(db_client: TestClient, seed: Seeder) -> None:
     _, admin = login_as(db_client, seed, Role.admin)
     dept = seed.insert("department", name=f"D {uuid4().hex[:8]}")
     cat = seed.insert("category", name=f"C {uuid4().hex[:8]}")
     seed.insert("asset", name="pump", department_id=dept, category_id=cat)
-    assert (
-        db_client.delete(f"{API}/departments/{dept}", headers=admin).status_code == 409
-    )
+    assert db_client.delete(f"{API}/categories/{cat}", headers=admin).status_code == 409

@@ -331,8 +331,10 @@ paths:
       description: Everyone signs up as a `requester`; an admin promotes them. A `supervisor`
         needs a `departmentId`; an `assignee` (a vendor's technician) needs a `vendorId`.
         Setting `requester` clears both. Admin accounts are created with `POST /admins`
-        and their role cannot be changed here. The person's current access token keeps
-        its old role until it expires.
+        and their role cannot be changed here. The person's access token keeps its
+        old role until it expires or is refreshed. An assignee who changes role or
+        vendor is taken off their tickets, and a supervisor who changes role or department
+        stops supervising their tickets.
       operationId: assign_role
       security:
       - AccessToken: []
@@ -637,7 +639,9 @@ paths:
       tags:
       - vendors
       summary: Delete a vendor (admin only)
-      description: Fails with 409 while people, assets or tickets still refer to it.
+      description: Its technicians are taken off their tickets (a ticket left with
+        nobody reopens) and become plain requesters; its asset responsibilities are
+        dropped.
       operationId: delete_vendor
       security:
       - AccessToken: []
@@ -828,7 +832,8 @@ paths:
       tags:
       - departments
       summary: Delete a department (admin only)
-      description: Fails with 409 while people, assets or tickets still refer to it.
+      description: Its assets are deleted too (their tickets stay, without an asset)
+        and its supervisors become plain requesters.
       operationId: delete_department
       security:
       - AccessToken: []
@@ -1285,7 +1290,7 @@ paths:
       tags:
       - assets
       summary: Delete an asset (supervisor or admin)
-      description: Fails with 409 while tickets refer to the asset.
+      description: Tickets on the asset stay, without an asset (back in triage).
       operationId: delete_asset
       security:
       - AccessToken: []

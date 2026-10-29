@@ -115,7 +115,7 @@ def test_update_and_delete_only_in_own_department(
     assert db_client.get(url, headers=sup).status_code == 404
 
 
-def test_cannot_delete_asset_with_tickets(
+def test_deleting_an_asset_returns_its_tickets_to_triage(
     db_client: TestClient, seed: Seeder, world: dict[str, object]
 ) -> None:
     _, sup = login_as(db_client, seed, Role.supervisor, department_id=world["dept"])
@@ -133,8 +133,10 @@ def test_cannot_delete_asset_with_tickets(
     )
     assert (
         db_client.delete(f"{API}/{created.json()['id']}", headers=sup).status_code
-        == 409
+        == 204
     )
+    after = db_client.get(f"/api/v1/tickets/{ticket}", headers=sup).json()
+    assert after["assetId"] is None
 
 
 def test_vendors_linked_to_assets(
@@ -166,12 +168,6 @@ def test_vendors_linked_to_assets(
         "/api/v1/vendors", params={"assetId": asset.json()["id"]}, headers=requester
     )
     assert [v["id"] for v in vendors.json()["items"]] == [str(vendor)]
-
-    # A vendor with responsibilities cannot be deleted from under the assets.
-    _, admin = login_as(db_client, seed, Role.admin)
-    assert (
-        db_client.delete(f"/api/v1/vendors/{vendor}", headers=admin).status_code == 409
-    )
 
     assert db_client.delete(url, headers=rival).status_code == 403
     assert db_client.delete(url, headers=sup).status_code == 204
