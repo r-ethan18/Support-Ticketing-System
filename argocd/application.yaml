@@ -1,0 +1,47 @@
+---
+# ArgoCD Application definition for the Support Ticketing System.
+#
+# Prerequisites before applying this file:
+#   1. A Kubernetes cluster is running and kubectl is configured.
+#   2. ArgoCD is installed (see k8s/README.md for installation commands).
+#   3. The sts-prod namespace exists OR createNamespace=true is used (configured below).
+#   4. The sts-secrets Kubernetes Secret exists in sts-prod (see k8s/README.md).
+#   5. ArgoCD has been given access to the repository (public repo: no extra steps).
+#
+# Apply with:
+#   kubectl apply -f argocd/application.yaml
+#
+# NOTE: Applying this file does NOT immediately deploy the application.
+#       ArgoCD must be installed, configured, and syncing before deployment occurs.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: support-ticketing-system
+  namespace: argocd           # ArgoCD's own namespace
+  # Finalizer ensures ArgoCD cleans up cluster resources when this Application
+  # is deleted. Remove it if you want to delete the Application without
+  # removing the running workloads.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  # ─── Source ─────────────────────────────────────────────────────────────────
+  source:
+    repoURL: https://github.com/r-ethan18/Support-Ticketing-System.git
+    targetRevision: main          # track the main branch
+    path: k8s/overlays/production # Kustomize overlay
+
+  # ─── Destination ────────────────────────────────────────────────────────────
+  destination:
+    server: https://kubernetes.default.svc   # in-cluster
+    namespace: sts-prod
+
+  # ─── Sync Policy ────────────────────────────────────────────────────────────
+  syncPolicy:
+    automated:
+      prune: true       # remove resources deleted from Git
+      selfHeal: true    # revert manual cluster changes
+    syncOptions:
+      - CreateNamespace=true   # create sts-prod if it does not exist
+      - ServerSideApply=true   # recommended for StatefulSets
