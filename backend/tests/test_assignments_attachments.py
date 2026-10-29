@@ -228,13 +228,66 @@ def test_no_attachments_on_closed_ticket(scene: Scene, db_client: TestClient) ->
     assert response.status_code == 409
 
 
-def test_cannot_delete_assignee_with_history(
+def test_deleting_an_assignee_unassigns_them_and_keeps_history(
+    scene: Scene, db_client: TestClient
+) -> None:
+    person, headers = scene.assignee()
+    other, _ = scene.assignee()
+    scene.assign(person)
+    scene.assign(other)
+    db_client.post(f"{scene.url}/comments", json={"body": "on it"}, headers=headers)
+    assert scene.status() == "assigned"
+
+    response = db_client.delete(f"/api/v1/people/{person}", headers=scene.admin)
+    assert response.status_code == 204
+
+    # Someone else is still on the ticket, so it stays assigned.
+    assert scene.status() == "assigned"
+    assignments = db_client.get(f"{scene.url}/assignments", headers=scene.admin).json()
+    gone = next(a for a in assignments if a["assigneeId"] is None)
+    assert gone["unassignedAt"] is not None
+    comments = db_client.get(f"{scene.url}/comments", headers=scene.admin).json()
+    assert [c["authorId"] for c in comments] == [None]
+
+
+def test_deleting_the_last_assignee_reopens_the_ticket(
     scene: Scene, db_client: TestClient
 ) -> None:
     person, _ = scene.assignee()
     scene.assign(person)
-    response = db_client.delete(f"/api/v1/people/{person}", headers=scene.admin)
-    assert response.status_code == 409
+    assert scene.status() == "assigned"
+
+    db_client.delete(f"/api/v1/people/{person}", headers=scene.admin)
+
+    assert scene.status() == "open"
+    history = db_client.get(f"{scene.url}/status-history", headers=scene.admin).json()
+    assert history[-1]["fromStatus"] == "assigned"
+    assert history[-1]["toStatus"] == "open"
+
+
+def test_deleting_a_requester_deletes_their_tickets(
+    scene: Scene, db_client: TestClient
+) -> None:
+    person, _ = scene.assignee()
+    scene.assign(person)
+
+    response = db_client.delete(f"/api/v1/people/{scene.owner_id}", headers=scene.admin)
+
+    assert response.status_code == 204
+    assert db_client.get(scene.url, headers=scene.admin).status_code == 404
+
+
+def test_deleting_a_supervisor_clears_ticket_supervisor(
+    scene: Scene, db_client: TestClient
+) -> None:
+    db_client.patch(
+        scene.url, json={"supervisorId": str(scene.sup_id)}, headers=scene.sup
+    )
+    assert db_client.get(scene.url, headers=scene.admin).json()["supervisorId"] == str(
+        scene.sup_id
+    )
+    db_client.delete(f"/api/v1/people/{scene.sup_id}", headers=scene.admin)
+    assert db_client.get(scene.url, headers=scene.admin).json()["supervisorId"] is None
 
 
 def test_cannot_change_role_of_assignee_with_active_assignment(

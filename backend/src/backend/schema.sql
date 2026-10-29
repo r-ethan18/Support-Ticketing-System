@@ -145,3 +145,45 @@ CREATE TABLE IF NOT EXISTS refresh_token (
 
 CREATE INDEX IF NOT EXISTS refresh_token_person_idx ON refresh_token (person_id);
 CREATE INDEX IF NOT EXISTS refresh_token_family_idx ON refresh_token (family_id);
+
+-- Deleting a person: their own tickets go with them, while records they merely
+-- took part in (comments, uploads, history, past assignments) are kept with the
+-- person blanked. `ticket.supervisor_id` already behaves that way.
+ALTER TABLE ticket_assignment ALTER COLUMN assignee_id DROP NOT NULL;
+ALTER TABLE ticket_attachment ALTER COLUMN uploaded_by_id DROP NOT NULL;
+ALTER TABLE ticket_comment ALTER COLUMN author_id DROP NOT NULL;
+ALTER TABLE ticket_status_history ALTER COLUMN changed_by_id DROP NOT NULL;
+
+DO $$
+DECLARE
+    fk record;
+BEGIN
+    FOR fk IN
+        SELECT * FROM (VALUES
+            ('ticket', 'requester_id', 'person', 'c'),
+            ('ticket_assignment', 'assignee_id', 'person', 'n'),
+            ('ticket_attachment', 'uploaded_by_id', 'person', 'n'),
+            ('ticket_comment', 'author_id', 'person', 'n'),
+            ('ticket_status_history', 'changed_by_id', 'person', 'n')
+        ) AS v (tbl, col, ref, on_delete)
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint c
+            WHERE c.contype = 'f'
+              AND c.conrelid = fk.tbl::regclass
+              AND c.confrelid = fk.ref::regclass
+              AND c.confdeltype = fk.on_delete::"char"
+              AND c.conkey = ARRAY[(
+                  SELECT attnum FROM pg_attribute
+                  WHERE attrelid = fk.tbl::regclass AND attname = fk.col
+              )]
+        ) THEN
+            EXECUTE format('ALTER TABLE %I DROP CONSTRAINT IF EXISTS %I',
+                           fk.tbl, fk.tbl || '_' || fk.col || '_fkey');
+            EXECUTE format(
+                'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I (id) ON DELETE %s',
+                fk.tbl, fk.tbl || '_' || fk.col || '_fkey', fk.col, fk.ref,
+                CASE fk.on_delete WHEN 'c' THEN 'CASCADE' ELSE 'SET NULL' END);
+        END IF;
+    END LOOP;
+END $$;

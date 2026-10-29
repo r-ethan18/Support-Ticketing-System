@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.accounts import PERSON_COLUMNS
 from backend.auth import CurrentUserDep, require_roles
+from backend.cascade import release_assignments
 from backend.db import PoolDep, fetch_or_404, fetch_page, like_pattern
 from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND
 from backend.routers.deps import PaginationDep
@@ -13,8 +14,6 @@ from backend.schemas.enums import Role
 from backend.schemas.people import Person, PersonPage, RoleAssignment
 
 router = APIRouter(prefix="/people", tags=["people"])
-
-STAFF_ROLES = (Role.supervisor, Role.assignee)
 
 
 @router.get(
@@ -154,15 +153,18 @@ async def get_person(person_id: UUID, user: CurrentUserDep, pool: PoolDep) -> Pe
 @router.delete(
     "/{person_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a supervisor or assignee (admin only)",
+    summary="Delete a person (admin only)",
     description=(
-        "Requesters and admins cannot be deleted here. An assignee who appears in a"
-        " ticket's assignment history cannot be deleted (409)."
+        "Admin accounts cannot be deleted here. Deleting a person also deletes the"
+        " tickets they requested. An assignee is first taken off the tickets they"
+        " are on (a ticket left with nobody goes back to `open`). A supervisor's"
+        " tickets lose their supervisor. Comments, uploads, history and past"
+        " assignments are kept, with the person blanked."
     ),
     dependencies=[Depends(require_roles(Role.admin))],
-    responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},
+    responses={**NOT_FOUND, **FORBIDDEN},
 )
-async def delete_person(person_id: UUID, pool: PoolDep) -> None:
+async def delete_person(person_id: UUID, user: CurrentUserDep, pool: PoolDep) -> None:
     person = await fetch_or_404(
         pool,
         Person,
@@ -170,16 +172,10 @@ async def delete_person(person_id: UUID, pool: PoolDep) -> None:
         [person_id],
         "Person",
     )
-    if person.role not in STAFF_ROLES:
+    if person.role is Role.admin:
         raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            detail="Only supervisor and assignee accounts can be deleted",
+            status.HTTP_403_FORBIDDEN, detail="Admin accounts cannot be deleted here"
         )
-    try:
-        async with pool.connection() as conn:
-            await conn.execute("DELETE FROM person WHERE id = %s", (person_id,))
-    except psycopg.errors.ForeignKeyViolation:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail="Person is referenced by existing tickets and cannot be deleted",
-        ) from None
+    async with pool.connection() as conn:
+        await release_assignments(conn, [person_id], user.id)
+        await conn.execute("DELETE FROM person WHERE id = %s", (person_id,))

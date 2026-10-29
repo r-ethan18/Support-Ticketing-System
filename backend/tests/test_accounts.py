@@ -235,9 +235,7 @@ def test_non_admins_cannot_delete_staff(
     )
 
 
-def test_admin_deletes_staff_but_not_requesters_or_admins(
-    db_client: TestClient, seed: Seeder
-) -> None:
+def test_admin_deletes_anyone_but_admins(db_client: TestClient, seed: Seeder) -> None:
     _, admin = login_as(db_client, seed, Role.admin)
     assignee = seed.person(Role.assignee)
     requester = seed.person(Role.requester)
@@ -248,7 +246,7 @@ def test_admin_deletes_staff_but_not_requesters_or_admins(
     )
     assert db_client.get(f"{API}/people/{assignee}", headers=admin).status_code == 404
     assert (
-        db_client.delete(f"{API}/people/{requester}", headers=admin).status_code == 403
+        db_client.delete(f"{API}/people/{requester}", headers=admin).status_code == 204
     )
     assert (
         db_client.delete(f"{API}/people/{other_admin}", headers=admin).status_code
