@@ -44,12 +44,15 @@ class PubSubHub:
         subs = self._subscribers.get(ticket_id)
         if not subs:
             return
-        # Put on every queue; drop the event for a slow client rather than blocking.
+        # Never block on a slow client. If its queue is full it has missed events,
+        # so replace the backlog with a `resync` telling it to reload.
         for q in list(subs):
             try:
                 q.put_nowait(event)
             except asyncio.QueueFull:
-                pass  # client is too slow – we skip this event for them
+                while not q.empty():
+                    q.get_nowait()
+                q.put_nowait({"event": "resync", "data": {"ticketId": str(ticket_id)}})
 
 
 # Singleton shared across the app (set in lifespan, retrieved via `get_hub`).

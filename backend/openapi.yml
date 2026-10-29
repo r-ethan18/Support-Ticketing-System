@@ -2144,9 +2144,12 @@ paths:
       summary: SSE stream of live updates for a ticket
       description: 'Server-Sent Events endpoint. Connect with `EventSource` (with
         an Authorization header via a custom fetch). Emits `comment` events when a
-        new comment is posted and `status` events when the ticket status changes.
-        A `connected` event is sent immediately on connection, and a `: heartbeat`
-        comment every 25 s keeps the connection alive.'
+        new comment is posted and `status` events when the ticket status changes,
+        `assignment` events when assignees change, `resync` when the client fell behind
+        and should reload, and `deleted`/`closed` just before the server ends the
+        stream (ticket deleted, or the caller lost access). A `connected` event is
+        sent immediately on connection, and a `: heartbeat` comment every 25 s keeps
+        the connection alive; access is re-checked at each heartbeat.'
       operationId: stream_ticket
       security:
       - AccessToken: []
