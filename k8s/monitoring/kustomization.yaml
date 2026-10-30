@@ -9,3 +9,15 @@ namespace: sts-prod
 resources:
   - backend-podmonitor.yaml
   - backend-networkpolicy.yaml
+
+# Grafana's dashboard sidecar loads any ConfigMap labelled grafana_dashboard=1
+# (it watches all namespaces). The name hash is off so the label and name stay
+# stable across edits.
+configMapGenerator:
+  - name: sts-backend-dashboard
+    files:
+      - dashboards/backend.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
