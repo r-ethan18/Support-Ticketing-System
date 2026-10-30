@@ -1,5 +1,6 @@
 import {
 	BarChart3,
+	Boxes,
 	CheckSquare,
 	Compass,
 	HelpCircle,
@@ -70,6 +71,13 @@ const NAV_ITEMS: NavItem[] = [
 		roles: ["supervisor"],
 	},
 
+	{
+		label: "Assets",
+		to: "/supervisor/assets",
+		icon: Boxes,
+		roles: ["supervisor"],
+	},
+
 	// Admin Navigation
 	{
 		label: "Administration",
@@ -81,6 +89,12 @@ const NAV_ITEMS: NavItem[] = [
 		label: "User Management",
 		to: "/admin/users",
 		icon: Users,
+		roles: ["admin"],
+	},
+	{
+		label: "Directory",
+		to: "/admin/directory",
+		icon: Boxes,
 		roles: ["admin"],
 	},
 	{
