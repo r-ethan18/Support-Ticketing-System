@@ -56,6 +56,9 @@ def s3(monkeypatch: pytest.MonkeyPatch) -> S3ObjectStore:
 def test_storage_settings_come_from_the_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    for name in ("S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET"):
+        monkeypatch.delenv(name, raising=False)
+    get_settings.cache_clear()
     assert not get_settings().storage.enabled
     monkeypatch.setenv("S3_ENDPOINT", "garage:3900")
     monkeypatch.setenv("S3_ACCESS_KEY", "ak")

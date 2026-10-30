@@ -358,6 +358,8 @@ def test_uploads_report_unavailable_without_storage(
     scene: Scene, db_client: TestClient
 ) -> None:
     del db_client.app.dependency_overrides[get_object_store]
+    # CI configures a real store at startup; here there is none.
+    db_client.app.state.object_store = None
     response = upload(db_client, f"{scene.url}/attachments", scene.owner)
     assert response.status_code == 503
 
