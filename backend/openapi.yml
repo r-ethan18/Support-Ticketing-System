@@ -11,7 +11,12 @@ paths:
       - auth
       summary: Exchange credentials for an access token
       description: 'Public endpoint. Send the returned token as `Authorization: Bearer
-        <token>`.'
+        <token>`.
+
+
+        Repeated failures for the same account and client address are locked out
+
+        for a while (429).'
       operationId: create_access_token
       requestBody:
         content:
@@ -32,6 +37,65 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too many failed attempts; see `Retry-After`
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/refresh:
+    post:
+      tags:
+      - auth
+      summary: Exchange a refresh token for a new token pair
+      description: 'Refresh tokens are single-use: the response carries a replacement.
+        The new access token has the person''s *current* role. Sending a token that
+        was already used revokes that whole session.'
+      operationId: refresh_access_token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/logout:
+    post:
+      tags:
+      - auth
+      summary: Revoke a refresh token's session
+      description: Idempotent. Access tokens already issued stay valid until they
+        expire.
+      operationId: logout
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+        required: true
+      responses:
+        '204':
+          description: Successful Response
         '422':
           description: Validation Error
           content:
@@ -89,6 +153,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - AccessToken: []
+  /api/v1/auth/password:
+    post:
+      tags:
+      - auth
+      summary: Change the authenticated person's password
+      description: Revokes all of the person's refresh tokens, so other devices must
+        log in again.
+      operationId: change_password
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordChange'
+        required: true
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          description: Current password is wrong, or the new one is unchanged
+        '429':
+          description: Too many wrong current passwords; see `Retry-After`
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
       security:
       - AccessToken: []
   /api/v1/admins:
@@ -232,8 +331,10 @@ paths:
       description: Everyone signs up as a `requester`; an admin promotes them. A `supervisor`
         needs a `departmentId`; an `assignee` (a vendor's technician) needs a `vendorId`.
         Setting `requester` clears both. Admin accounts are created with `POST /admins`
-        and their role cannot be changed here. The person's current access token keeps
-        its old role until it expires.
+        and their role cannot be changed here. The person's access token keeps its
+        old role until it expires or is refreshed. An assignee who changes role or
+        vendor is taken off their tickets, and a supervisor who changes role or department
+        stops supervising their tickets.
       operationId: assign_role
       security:
       - AccessToken: []
@@ -293,6 +394,9 @@ paths:
       tags:
       - people
       summary: Get a person
+      description: Staff profiles are visible to everyone. A requester's profile is
+        visible to that requester, supervisors, admins, and an assignee currently
+        assigned to one of their tickets.
       operationId: get_person
       security:
       - AccessToken: []
@@ -338,9 +442,13 @@ paths:
     delete:
       tags:
       - people
-      summary: Delete a supervisor or assignee (admin only)
-      description: Requesters and admins cannot be deleted here. An assignee who appears
-        in a ticket's assignment history cannot be deleted (409).
+      summary: Delete a person (admin only)
+      description: 'Admin accounts cannot be deleted here. Nothing other people are
+        involved in is destroyed: the person''s tickets, comments, uploads, history
+        and past assignments stay, with the person shown as a deleted user (`null`
+        id). Only closed tickets nobody else touched are removed. An assignee is first
+        taken off the tickets they are on (a ticket left with nobody goes back to
+        `open`), and a supervisor''s tickets lose their supervisor.'
       operationId: delete_person
       security:
       - AccessToken: []
@@ -369,12 +477,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
           description: Caller's role may not do this
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: Resource already exists
           content:
             application/json:
               schema:
@@ -541,7 +643,9 @@ paths:
       tags:
       - vendors
       summary: Delete a vendor (admin only)
-      description: Fails with 409 while people, assets or tickets still refer to it.
+      description: Fails with 409 while the vendor is responsible for any asset. Its
+        technicians are taken off their tickets (a ticket left with nobody reopens)
+        and become plain requesters.
       operationId: delete_vendor
       security:
       - AccessToken: []
@@ -732,7 +836,8 @@ paths:
       tags:
       - departments
       summary: Delete a department (admin only)
-      description: Fails with 409 while people, assets or tickets still refer to it.
+      description: Fails with 409 while the department owns assets. Its supervisors
+        become plain requesters.
       operationId: delete_department
       security:
       - AccessToken: []
@@ -2137,6 +2242,51 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tickets/{ticket_id}/stream:
+    get:
+      tags:
+      - tickets
+      summary: SSE stream of live updates for a ticket
+      description: 'Server-Sent Events endpoint. Connect with `EventSource` (with
+        an Authorization header via a custom fetch). Emits `comment` events when a
+        new comment is posted and `status` events when the ticket status changes,
+        `assignment` events when assignees change, `resync` when the client fell behind
+        and should reload, and `deleted`/`closed` just before the server ends the
+        stream (ticket deleted, or the caller lost access). A `connected` event is
+        sent immediately on connection, and a `: heartbeat` comment every 25 s keeps
+        the connection alive; access is re-checked at each heartbeat.'
+      operationId: stream_ticket
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      responses:
+        '200':
+          description: Successful Response
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AdminCreate:
@@ -2371,6 +2521,22 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    PasswordChange:
+      properties:
+        currentPassword:
+          type: string
+          maxLength: 128
+          title: Currentpassword
+        newPassword:
+          type: string
+          maxLength: 128
+          minLength: 12
+          title: Newpassword
+      type: object
+      required:
+      - currentPassword
+      - newPassword
+      title: PasswordChange
     Person:
       properties:
         id:
@@ -2431,6 +2597,16 @@ components:
       - limit
       - offset
       title: PersonPage
+    RefreshRequest:
+      properties:
+        refreshToken:
+          type: string
+          maxLength: 256
+          title: Refreshtoken
+      type: object
+      required:
+      - refreshToken
+      title: RefreshRequest
     RegisterRequest:
       properties:
         name:
@@ -2524,9 +2700,12 @@ components:
           - type: 'null'
           title: Closedat
         requesterId:
-          type: string
-          format: uuid
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
           title: Requesterid
+          description: Null once the requester's account is deleted
         assetId:
           anyOf:
           - type: string
@@ -2548,7 +2727,6 @@ components:
       - priority
       - status
       - createdAt
-      - requesterId
       title: Ticket
     TicketAssignment:
       properties:
@@ -2561,9 +2739,12 @@ components:
           format: uuid
           title: Ticketid
         assigneeId:
-          type: string
-          format: uuid
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
           title: Assigneeid
+          description: Null once the assignee's account is deleted
         assignedAt:
           type: string
           format: date-time
@@ -2578,7 +2759,6 @@ components:
       required:
       - id
       - ticketId
-      - assigneeId
       - assignedAt
       title: TicketAssignment
     TicketAssignmentCreate:
@@ -2602,9 +2782,12 @@ components:
           format: uuid
           title: Ticketid
         uploadedById:
-          type: string
-          format: uuid
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
           title: Uploadedbyid
+          description: Null once the uploader's account is deleted
         kind:
           $ref: '#/components/schemas/AttachmentKind'
         storageUrl:
@@ -2618,7 +2801,6 @@ components:
       required:
       - id
       - ticketId
-      - uploadedById
       - kind
       - storageUrl
       - uploadedAt
@@ -2648,9 +2830,12 @@ components:
           format: uuid
           title: Ticketid
         authorId:
-          type: string
-          format: uuid
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
           title: Authorid
+          description: Null once the author's account is deleted
         body:
           type: string
           title: Body
@@ -2662,7 +2847,6 @@ components:
       required:
       - id
       - ticketId
-      - authorId
       - body
       - createdAt
       title: TicketComment
@@ -2762,9 +2946,12 @@ components:
         toStatus:
           $ref: '#/components/schemas/TicketStatus'
         changedById:
-          type: string
-          format: uuid
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
           title: Changedbyid
+          description: Null once that account is deleted
         changedAt:
           type: string
           format: date-time
@@ -2774,7 +2961,6 @@ components:
       - id
       - ticketId
       - toStatus
-      - changedById
       - changedAt
       title: TicketStatusHistoryEntry
     TicketUpdate:
@@ -2835,6 +3021,10 @@ components:
         accessToken:
           type: string
           title: Accesstoken
+        refreshToken:
+          type: string
+          title: Refreshtoken
+          description: Single-use; exchange at `POST /auth/refresh` for a new pair
         tokenType:
           type: string
           title: Tokentype
@@ -2846,6 +3036,7 @@ components:
       type: object
       required:
       - accessToken
+      - refreshToken
       - expiresIn
       title: TokenResponse
     ValidationError:

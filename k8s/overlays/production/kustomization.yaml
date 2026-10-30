@@ -1,0 +1,27 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ─── Source ───────────────────────────────────────────────────────────────────
+resources:
+  - ../../base
+
+# ─── Namespace ────────────────────────────────────────────────────────────────
+namespace: sts-prod
+
+# ─── Images ───────────────────────────────────────────────────────────────────
+# Image names match exactly what the existing docker-build-push.yml workflow
+# publishes to GHCR:
+#   ghcr.io/r-ethan18/support-ticketing-system-backend
+#   ghcr.io/r-ethan18/support-ticketing-system-frontend
+#
+# `latest` is only the bootstrap value. Argo CD Image Updater (see
+# argocd/image-updater.yaml) overrides these with the newest immutable
+# sha-<commit> tag on the Application, so nothing here is rewritten by CI.
+images:
+  - name: ghcr.io/r-ethan18/support-ticketing-system-backend
+    newName: ghcr.io/r-ethan18/support-ticketing-system-backend
+    newTag: latest   # overridden at runtime by Image Updater
+  - name: ghcr.io/r-ethan18/support-ticketing-system-frontend
+    newName: ghcr.io/r-ethan18/support-ticketing-system-frontend
+    newTag: latest   # overridden at runtime by Image Updater

@@ -2,6 +2,8 @@
  * Centralized API client for communicating with /api/v1
  */
 
+import type { TokenResponse } from "../types/api";
+
 export class ApiError extends Error {
 	constructor(
 		public status: number,
@@ -23,9 +25,31 @@ export class ApiError extends Error {
 	get isForbidden(): boolean {
 		return this.status === 403;
 	}
+
+	get isNotFound(): boolean {
+		return this.status === 404;
+	}
+
+	get isConflict(): boolean {
+		return this.status === 409;
+	}
+
+	get isValidationError(): boolean {
+		return this.status === 422;
+	}
 }
 
 const TOKEN_KEY = "sts_auth_token";
+const REFRESH_TOKEN_KEY = "sts_refresh_token";
+
+/** Fired when a session can no longer be refreshed and the user must log in. */
+export const SESSION_EXPIRED_EVENT = "sts:session-expired";
+
+/**
+ * Fired after a 403: the person's role may have changed since their access
+ * token was issued, so the session should be refreshed and re-read.
+ */
+export const SESSION_SYNC_EVENT = "sts:session-sync";
 
 export const getStoredToken = (): string | null => {
 	try {
@@ -43,29 +67,123 @@ export const setStoredToken = (token: string): void => {
 	}
 };
 
+export const getStoredRefreshToken = (): string | null => {
+	try {
+		return localStorage.getItem(REFRESH_TOKEN_KEY);
+	} catch {
+		return null;
+	}
+};
+
+export const setStoredRefreshToken = (token: string): void => {
+	try {
+		localStorage.setItem(REFRESH_TOKEN_KEY, token);
+	} catch {
+		// Ignore storage errors in private browsing
+	}
+};
+
 export const removeStoredToken = (): void => {
 	try {
 		localStorage.removeItem(TOKEN_KEY);
+		localStorage.removeItem(REFRESH_TOKEN_KEY);
 	} catch {
 		// Ignore storage errors
 	}
 };
 
-interface RequestOptions extends RequestInit {
-	params?: Record<string, string | number | boolean | null | undefined>;
+export interface RequestOptions extends RequestInit {
+	/** Don't try to refresh the access token if this request gets a 401. */
+	skipAuthRefresh?: boolean;
+	params?: Record<
+		string,
+		string | number | boolean | null | undefined | (string | number)[]
+	>;
+}
+
+export const getApiBaseUrl = (): string => {
+	const envUrl =
+		import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_BACKEND_URL;
+	if (!envUrl) return "";
+	return envUrl.replace(/\/+$/, "");
+};
+
+const buildApiUrl = (endpoint: string): string => {
+	// Ensure clean path construction without duplicate /api or /api/v1 prefixes
+	const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+	return `${getApiBaseUrl()}${path.startsWith("/api/") ? path : `/api/v1${path}`}`;
+};
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function exchangeRefreshToken(startedWith: string): Promise<boolean> {
+	// Another tab may have rotated the token while we waited for the lock;
+	// reusing the old one would make the server revoke the whole session.
+	const refreshToken = getStoredRefreshToken();
+	if (!refreshToken) return false;
+	if (refreshToken !== startedWith) return true;
+	try {
+		const response = await fetch(buildApiUrl("/auth/refresh"), {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ refreshToken }),
+		});
+		if (response.ok) {
+			const pair = (await response.json()) as TokenResponse;
+			setStoredToken(pair.accessToken);
+			setStoredRefreshToken(pair.refreshToken);
+			return true;
+		}
+		if (response.status === 401) {
+			removeStoredToken();
+			window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+		}
+		return false;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Trade the stored refresh token for a new token pair. Refresh tokens are
+ * single-use, so callers in this tab share one request and tabs take turns
+ * via a Web Lock. Resolves `false` without ending the session if the server
+ * couldn't be reached.
+ */
+export function refreshSession(): Promise<boolean> {
+	refreshInFlight ??= (async () => {
+		const startedWith = getStoredRefreshToken();
+		if (!startedWith) return false;
+		if (!navigator.locks) return exchangeRefreshToken(startedWith);
+		return navigator.locks.request("sts-refresh-token", () =>
+			exchangeRefreshToken(startedWith),
+		);
+	})().finally(() => {
+		refreshInFlight = null;
+	});
+	return refreshInFlight;
 }
 
 export async function apiRequest<T>(
 	endpoint: string,
 	options: RequestOptions = {},
 ): Promise<T> {
+	const { skipAuthRefresh, ...fetchOptions } = options;
 	const token = getStoredToken();
-	let url = endpoint.startsWith("/api") ? endpoint : `/api/v1${endpoint}`;
 
-	if (options.params) {
+	let url = buildApiUrl(endpoint);
+
+	if (fetchOptions.params) {
 		const searchParams = new URLSearchParams();
-		for (const [key, value] of Object.entries(options.params)) {
-			if (value !== undefined && value !== null) {
+		for (const [key, value] of Object.entries(fetchOptions.params)) {
+			if (value === undefined || value === null || value === "") continue;
+			if (Array.isArray(value)) {
+				for (const item of value) {
+					if (item !== undefined && item !== null && item !== "") {
+						searchParams.append(key, String(item));
+					}
+				}
+			} else {
 				searchParams.append(key, String(value));
 			}
 		}
@@ -77,7 +195,7 @@ export async function apiRequest<T>(
 
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
-		...(options.headers as Record<string, string>),
+		...(fetchOptions.headers as Record<string, string>),
 	};
 
 	if (token) {
@@ -86,9 +204,25 @@ export async function apiRequest<T>(
 
 	try {
 		const response = await fetch(url, {
-			...options,
+			...fetchOptions,
 			headers,
 		});
+
+		if (
+			response.status === 401 &&
+			token &&
+			!skipAuthRefresh &&
+			(await refreshSession())
+		) {
+			return await apiRequest<T>(endpoint, {
+				...options,
+				skipAuthRefresh: true,
+			});
+		}
+
+		if (response.status === 403 && token && !skipAuthRefresh) {
+			window.dispatchEvent(new Event(SESSION_SYNC_EVENT));
+		}
 
 		if (!response.ok) {
 			let detail = `Request failed with status ${response.status}`;
@@ -98,7 +232,12 @@ export async function apiRequest<T>(
 					detail = errorJson.detail;
 				} else if (Array.isArray(errorJson.detail)) {
 					detail = errorJson.detail
-						.map((e: { msg?: string }) => e.msg || JSON.stringify(e))
+						.map((e: { loc?: string[]; msg?: string }) => {
+							const field = e.loc
+								? e.loc.filter((l) => l !== "body").join(".")
+								: "";
+							return field ? `${field}: ${e.msg}` : e.msg || JSON.stringify(e);
+						})
 						.join(", ");
 				}
 			} catch {

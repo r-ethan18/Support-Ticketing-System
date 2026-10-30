@@ -6,7 +6,7 @@ import {
 	Send,
 	UploadCloud,
 } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../components/common/Button";
 import { Input } from "../../components/common/Input";
@@ -14,7 +14,7 @@ import { Select } from "../../components/common/Select";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { ticketService } from "../../services/ticketService";
-import type { Asset, TicketPriority } from "../../types/api";
+import type { TicketPriority } from "../../types/api";
 
 export function CreateTicketPage() {
 	const { user } = useAuth();
@@ -25,24 +25,10 @@ export function CreateTicketPage() {
 	const [location, setLocation] = useState("");
 	const [priority, setPriority] = useState<TicketPriority>("medium");
 	const [description, setDescription] = useState("");
-	const [selectedAssetId, setSelectedAssetId] = useState("");
 	const [attachmentUrl, setAttachmentUrl] = useState("");
 
-	const [assets, setAssets] = useState<Asset[]>([]);
 	const [submitting, setSubmitting] = useState(false);
 	const [formError, setFormError] = useState<string | null>(null);
-
-	useEffect(() => {
-		async function loadOptions() {
-			try {
-				const loadedAssets = await ticketService.listAssets();
-				setAssets(loadedAssets);
-			} catch (err) {
-				console.error("Failed to load assets", err);
-			}
-		}
-		loadOptions();
-	}, []);
 
 	const handleSubmit = async (e: FormEvent) => {
 		e.preventDefault();
@@ -71,7 +57,6 @@ export function CreateTicketPage() {
 					description: description.trim(),
 				},
 				user?.id || "p-req-1",
-				selectedAssetId || undefined,
 			);
 
 			if (attachmentUrl.trim()) {
@@ -181,29 +166,6 @@ export function CreateTicketPage() {
 								<option value="critical">
 									Critical — Immediate outage or safety hazard
 								</option>
-							</Select>
-						</div>
-
-						<div className="col-span-2">
-							<Select
-								id="ticket-asset"
-								name="assetId"
-								label="Related Equipment / Facility Asset (Optional)"
-								value={selectedAssetId}
-								onChange={(e) => {
-									setSelectedAssetId(e.target.value);
-									const asset = assets.find((a) => a.id === e.target.value);
-									if (asset && !location) {
-										setLocation(asset.location);
-									}
-								}}
-							>
-								<option value="">-- No specific asset or not listed --</option>
-								{assets.map((a) => (
-									<option key={a.id} value={a.id}>
-										{a.name} — ({a.location})
-									</option>
-								))}
 							</Select>
 						</div>
 

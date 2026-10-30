@@ -167,12 +167,6 @@ def test_vendors_linked_to_assets(
     )
     assert [v["id"] for v in vendors.json()["items"]] == [str(vendor)]
 
-    # A vendor with responsibilities cannot be deleted from under the assets.
-    _, admin = login_as(db_client, seed, Role.admin)
-    assert (
-        db_client.delete(f"/api/v1/vendors/{vendor}", headers=admin).status_code == 409
-    )
-
     assert db_client.delete(url, headers=rival).status_code == 403
     assert db_client.delete(url, headers=sup).status_code == 204
     assert db_client.delete(url, headers=sup).status_code == 404

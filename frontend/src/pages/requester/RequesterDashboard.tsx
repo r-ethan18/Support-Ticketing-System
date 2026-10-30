@@ -19,21 +19,52 @@ import type { Ticket } from "../../types/api";
 export function RequesterDashboard() {
 	const { user } = useAuth();
 	const navigate = useNavigate();
-	const [tickets, setTickets] = useState<Ticket[]>([]);
+	const [recentTickets, setRecentTickets] = useState<Ticket[]>([]);
+	const [counts, setCounts] = useState({
+		total: 0,
+		open: 0,
+		inProgress: 0,
+		resolved: 0,
+	});
 	const [loading, setLoading] = useState(true);
 
 	useEffect(() => {
 		async function loadDashboardTickets() {
 			try {
 				setLoading(true);
-				const res = await ticketService.listTickets({
-					callerRole: "requester",
-					callerId: user?.id,
-					limit: 5,
-					sortBy: "createdAt",
-					order: "desc",
+				// Counts come from the server's totals, so they stay correct past one page.
+				const base = { callerRole: "requester", callerId: user?.id } as const;
+				const [recent, all, open, inProgress, resolved] = await Promise.all([
+					ticketService.listTickets({
+						...base,
+						limit: 5,
+						sortBy: "createdAt",
+						order: "desc",
+					}),
+					ticketService.listTickets({ ...base, limit: 1 }),
+					ticketService.listTickets({
+						...base,
+						status: ["open", "assigned"],
+						limit: 1,
+					}),
+					ticketService.listTickets({
+						...base,
+						status: ["in_progress"],
+						limit: 1,
+					}),
+					ticketService.listTickets({
+						...base,
+						status: ["resolved", "closed"],
+						limit: 1,
+					}),
+				]);
+				setRecentTickets(recent.items);
+				setCounts({
+					total: all.total,
+					open: open.total,
+					inProgress: inProgress.total,
+					resolved: resolved.total,
 				});
-				setTickets(res.items);
 			} catch (err) {
 				console.error("Failed to load requester dashboard tickets", err);
 			} finally {
@@ -43,16 +74,10 @@ export function RequesterDashboard() {
 		loadDashboardTickets();
 	}, [user?.id]);
 
-	const totalTickets = tickets.length;
-	const openTickets = tickets.filter(
-		(t) => t.status === "open" || t.status === "assigned",
-	).length;
-	const inProgressTickets = tickets.filter(
-		(t) => t.status === "in_progress",
-	).length;
-	const resolvedTickets = tickets.filter(
-		(t) => t.status === "resolved" || t.status === "closed",
-	).length;
+	const totalTickets = counts.total;
+	const openTickets = counts.open;
+	const inProgressTickets = counts.inProgress;
+	const resolvedTickets = counts.resolved;
 
 	return (
 		<div className="page-wrapper">
@@ -147,7 +172,7 @@ export function RequesterDashboard() {
 
 				{loading ? (
 					<TableSkeleton rows={3} cols={5} />
-				) : tickets.length === 0 ? (
+				) : recentTickets.length === 0 ? (
 					<EmptyState
 						title="No tickets submitted yet"
 						description="When you encounter an equipment or facility issue, report it here."
@@ -176,7 +201,7 @@ export function RequesterDashboard() {
 								</tr>
 							</thead>
 							<tbody>
-								{tickets.map((ticket) => (
+								{recentTickets.map((ticket) => (
 									<tr
 										key={ticket.id}
 										className="clickable-row"

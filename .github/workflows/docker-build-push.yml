@@ -6,11 +6,18 @@ on:
       - main
   workflow_dispatch:
 
+# ─── Permissions ──────────────────────────────────────────────────────────────
+# packages: write  — needed to push images to GHCR
+# Nothing is written back to git: Argo CD Image Updater picks up new sha-* tags
+# from GHCR (see argocd/image-updater.yaml).
 permissions:
   contents: read
   packages: write
 
 jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Build and push both images (fan-out via matrix)
+  # ────────────────────────────────────────────────────────────────────────────
   build-and-push:
     name: Build & Push Images
     runs-on: ubuntu-latest

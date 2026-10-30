@@ -50,7 +50,8 @@ export interface Asset {
 	name: string;
 	departmentId: string;
 	categoryId: string;
-	location: string;
+	/** Only present in mock data; the backend's asset has no location. */
+	location?: string;
 }
 
 export interface Ticket {
@@ -62,7 +63,7 @@ export interface Ticket {
 	status: TicketStatus;
 	createdAt: string;
 	closedAt?: string | null;
-	requesterId: string;
+	requesterId: string | null;
 	assetId?: string | null;
 	supervisorId?: string | null;
 }
@@ -70,7 +71,7 @@ export interface Ticket {
 export interface TicketAssignment {
 	id: string;
 	ticketId: string;
-	assigneeId: string;
+	assigneeId: string | null;
 	assignedAt: string;
 	unassignedAt?: string | null;
 }
@@ -78,7 +79,7 @@ export interface TicketAssignment {
 export interface TicketComment {
 	id: string;
 	ticketId: string;
-	authorId: string;
+	authorId: string | null;
 	body: string;
 	createdAt: string;
 }
@@ -86,7 +87,7 @@ export interface TicketComment {
 export interface TicketAttachment {
 	id: string;
 	ticketId: string;
-	uploadedById: string;
+	uploadedById: string | null;
 	kind: AttachmentKind;
 	storageUrl: string;
 	uploadedAt: string;
@@ -97,7 +98,7 @@ export interface TicketStatusHistoryEntry {
 	ticketId: string;
 	fromStatus?: TicketStatus | null;
 	toStatus: TicketStatus;
-	changedById: string;
+	changedById: string | null;
 	changedAt: string;
 }
 
@@ -124,9 +125,10 @@ export interface TokenRequest {
 }
 
 export interface TokenResponse {
-	access_token: string;
-	token_type?: string;
-	expires_in: number;
+	accessToken: string;
+	refreshToken: string;
+	tokenType?: string;
+	expiresIn: number;
 }
 
 export interface ErrorResponse {

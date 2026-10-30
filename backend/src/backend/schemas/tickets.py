@@ -16,7 +16,9 @@ class Ticket(CamelModel):
     status: TicketStatus
     created_at: datetime
     closed_at: datetime | None = None
-    requester_id: UUID
+    requester_id: UUID | None = Field(
+        default=None, description="Null once the requester's account is deleted"
+    )
     # Unknown to the requester; filled in later by a supervisor.
     asset_id: UUID | None = None
     supervisor_id: UUID | None = None
@@ -46,7 +48,9 @@ class TicketUpdate(CamelModel):
 class TicketAssignment(CamelModel):
     id: UUID
     ticket_id: UUID
-    assignee_id: UUID
+    assignee_id: UUID | None = Field(
+        default=None, description="Null once the assignee's account is deleted"
+    )
     assigned_at: datetime
     unassigned_at: datetime | None = None
 
@@ -58,7 +62,9 @@ class TicketAssignmentCreate(CamelModel):
 class TicketAttachment(CamelModel):
     id: UUID
     ticket_id: UUID
-    uploaded_by_id: UUID
+    uploaded_by_id: UUID | None = Field(
+        default=None, description="Null once the uploader's account is deleted"
+    )
     kind: AttachmentKind
     storage_url: str
     uploaded_at: datetime
@@ -74,7 +80,9 @@ class TicketAttachmentCreate(CamelModel):
 class TicketComment(CamelModel):
     id: UUID
     ticket_id: UUID
-    author_id: UUID
+    author_id: UUID | None = Field(
+        default=None, description="Null once the author's account is deleted"
+    )
     body: str
     created_at: datetime
 
@@ -88,7 +96,9 @@ class TicketStatusHistoryEntry(CamelModel):
     ticket_id: UUID
     from_status: TicketStatus | None = None
     to_status: TicketStatus
-    changed_by_id: UUID
+    changed_by_id: UUID | None = Field(
+        default=None, description="Null once that account is deleted"
+    )
     changed_at: datetime
 
 

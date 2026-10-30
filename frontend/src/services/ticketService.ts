@@ -16,7 +16,7 @@ import type {
 	TicketUpdate,
 	Vendor,
 } from "../types/api";
-import { apiRequest } from "./apiClient";
+import { ApiError, apiRequest } from "./apiClient";
 import {
 	INITIAL_ASSETS,
 	INITIAL_ASSIGNMENTS,
@@ -38,17 +38,20 @@ const KEYS = {
 	ATTACHMENTS: "sts_mock_attachments",
 	STATUS_HISTORY: "sts_mock_status_history",
 	PEOPLE: "sts_mock_people",
+	DEPARTMENTS: "sts_mock_departments",
+	VENDORS: "sts_mock_vendors",
+	CATEGORIES: "sts_mock_categories",
+	ASSETS: "sts_mock_assets",
+	ASSET_VENDORS: "sts_mock_asset_vendors",
 	MOCK_MODE: "sts_use_mock_mode",
 };
 
 export const isMockMode = (): boolean => {
 	try {
-		const stored = localStorage.getItem(KEYS.MOCK_MODE);
-		// Default to true so app works out of the box with rich data,
-		// but user can toggle to Live Backend Mode at any time!
-		return stored === null ? true : stored === "true";
+		// Mock mode defaults to false: Real API is primary in production/integration
+		return localStorage.getItem(KEYS.MOCK_MODE) === "true";
 	} catch {
-		return true;
+		return false;
 	}
 };
 
@@ -92,6 +95,11 @@ export function resetMockData(): void {
 			JSON.stringify(INITIAL_STATUS_HISTORY),
 		);
 		localStorage.setItem(KEYS.PEOPLE, JSON.stringify(INITIAL_PEOPLE));
+		localStorage.setItem(KEYS.DEPARTMENTS, JSON.stringify(INITIAL_DEPARTMENTS));
+		localStorage.setItem(KEYS.VENDORS, JSON.stringify(INITIAL_VENDORS));
+		localStorage.setItem(KEYS.CATEGORIES, JSON.stringify(INITIAL_CATEGORIES));
+		localStorage.setItem(KEYS.ASSETS, JSON.stringify(INITIAL_ASSETS));
+		localStorage.removeItem(KEYS.ASSET_VENDORS);
 	} catch {
 		// Ignore
 	}
@@ -121,12 +129,13 @@ export const ticketService = {
 		if (!isMockMode()) {
 			return await apiRequest<PageResponse<Ticket>>("/tickets", {
 				params: {
-					status: filters.status?.join(","),
-					priority: filters.priority?.join(","),
+					status: filters.status,
+					priority: filters.priority,
 					requesterId: filters.requesterId,
 					assigneeId: filters.assigneeId,
 					supervisorId: filters.supervisorId,
 					departmentId: filters.departmentId,
+					assetId: filters.assetId,
 					q: filters.q,
 					limit: filters.limit ?? 25,
 					offset: filters.offset ?? 0,
@@ -220,15 +229,17 @@ export const ticketService = {
 		return found;
 	},
 
-	async createTicket(
-		body: TicketCreate,
-		requesterId: string,
-		assetId?: string,
-	): Promise<Ticket> {
+	async createTicket(body: TicketCreate, requesterId: string): Promise<Ticket> {
 		if (!isMockMode()) {
+			// Requesters can't pick an asset; a supervisor sets it during triage.
 			return await apiRequest<Ticket>("/tickets", {
 				method: "POST",
-				body: JSON.stringify(body),
+				body: JSON.stringify({
+					title: body.title,
+					description: body.description,
+					location: body.location,
+					priority: body.priority || "medium",
+				}),
 			});
 		}
 
@@ -245,7 +256,7 @@ export const ticketService = {
 			status: "open",
 			createdAt: now,
 			requesterId,
-			assetId: assetId || null,
+			assetId: null,
 		};
 
 		tickets.unshift(newTicket);
@@ -275,9 +286,20 @@ export const ticketService = {
 		callerId: string,
 	): Promise<Ticket> {
 		if (!isMockMode()) {
+			const payload: Record<string, unknown> = {};
+			if (update.title !== undefined) payload.title = update.title;
+			if (update.description !== undefined)
+				payload.description = update.description;
+			if (update.location !== undefined) payload.location = update.location;
+			if (update.priority !== undefined) payload.priority = update.priority;
+			if (update.status !== undefined) payload.status = update.status;
+			if (update.assetId !== undefined) payload.assetId = update.assetId;
+			if (update.supervisorId !== undefined)
+				payload.supervisorId = update.supervisorId;
+
 			return await apiRequest<Ticket>(`/tickets/${ticketId}`, {
 				method: "PATCH",
-				body: JSON.stringify(update),
+				body: JSON.stringify(payload),
 			});
 		}
 
@@ -301,7 +323,7 @@ export const ticketService = {
 					? update.supervisorId
 					: current.supervisorId,
 			closedAt:
-				update.status === "closed" || update.status === "resolved"
+				update.status === "closed"
 					? new Date().toISOString()
 					: update.status
 						? null
@@ -329,6 +351,18 @@ export const ticketService = {
 		return updated;
 	},
 
+	async deleteTicket(ticketId: string): Promise<void> {
+		if (!isMockMode()) {
+			await apiRequest<void>(`/tickets/${ticketId}`, {
+				method: "DELETE",
+			});
+			return;
+		}
+		let tickets = getStore<Ticket>(KEYS.TICKETS, INITIAL_TICKETS);
+		tickets = tickets.filter((t) => t.id !== ticketId);
+		setStore(KEYS.TICKETS, tickets);
+	},
+
 	async assignTicket(
 		ticketId: string,
 		assigneeId: string,
@@ -350,11 +384,15 @@ export const ticketService = {
 		);
 		const now = new Date().toISOString();
 
-		// Mark any existing active assignments as unassigned
-		for (const a of assignments) {
-			if (a.ticketId === ticketId && !a.unassignedAt) {
-				a.unassignedAt = now;
-			}
+		if (
+			assignments.some(
+				(a) =>
+					a.ticketId === ticketId &&
+					a.assigneeId === assigneeId &&
+					!a.unassignedAt,
+			)
+		) {
+			throw new Error("Assignee is already on this ticket");
 		}
 
 		const newAssignment: TicketAssignment = {
@@ -367,7 +405,6 @@ export const ticketService = {
 		assignments.push(newAssignment);
 		setStore(KEYS.ASSIGNMENTS, assignments);
 
-		// Also update ticket status to "assigned" if currently open
 		const tickets = getStore<Ticket>(KEYS.TICKETS, INITIAL_TICKETS);
 		const ticket = tickets.find((t) => t.id === ticketId);
 		if (ticket && ticket.status === "open") {
@@ -377,6 +414,30 @@ export const ticketService = {
 		}
 
 		return newAssignment;
+	},
+
+	async deleteAssignment(
+		ticketId: string,
+		assignmentId: string,
+	): Promise<void> {
+		if (!isMockMode()) {
+			await apiRequest<void>(
+				`/tickets/${ticketId}/assignments/${assignmentId}`,
+				{
+					method: "DELETE",
+				},
+			);
+			return;
+		}
+		const assignments = getStore<TicketAssignment>(
+			KEYS.ASSIGNMENTS,
+			INITIAL_ASSIGNMENTS,
+		);
+		const match = assignments.find((a) => a.id === assignmentId);
+		if (match) {
+			match.unassignedAt = new Date().toISOString();
+			setStore(KEYS.ASSIGNMENTS, assignments);
+		}
 	},
 
 	async listAssignments(ticketId: string): Promise<TicketAssignment[]> {
@@ -430,17 +491,25 @@ export const ticketService = {
 		return newComment;
 	},
 
-	async listAttachments(ticketId: string): Promise<TicketAttachment[]> {
+	async listAttachments(
+		ticketId: string,
+		kind?: "issue_evidence" | "completion_proof",
+	): Promise<TicketAttachment[]> {
 		if (!isMockMode()) {
 			return await apiRequest<TicketAttachment[]>(
 				`/tickets/${ticketId}/attachments`,
+				{
+					params: kind ? { kind } : undefined,
+				},
 			);
 		}
 		const attachments = getStore<TicketAttachment>(
 			KEYS.ATTACHMENTS,
 			INITIAL_ATTACHMENTS,
 		);
-		return attachments.filter((a) => a.ticketId === ticketId);
+		return attachments.filter(
+			(a) => a.ticketId === ticketId && (!kind || a.kind === kind),
+		);
 	},
 
 	async addAttachment(
@@ -496,12 +565,153 @@ export const ticketService = {
 			);
 	},
 
-	async listPeople(): Promise<Person[]> {
+	async listPeople(filters?: {
+		role?: Role;
+		vendorId?: string;
+		departmentId?: string;
+		q?: string;
+		limit?: number;
+		offset?: number;
+	}): Promise<Person[]> {
 		if (!isMockMode()) {
-			const res = await apiRequest<PageResponse<Person>>("/people");
-			return res.items;
+			try {
+				const res = await apiRequest<PageResponse<Person>>("/people", {
+					params: filters,
+				});
+				return res.items;
+			} catch (err) {
+				// Requesters are 403 on list_people per API spec
+				if (err instanceof ApiError && err.isForbidden) return [];
+				throw err;
+			}
 		}
-		return getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		let people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		if (filters?.role) {
+			people = people.filter((p) => p.role === filters.role);
+		}
+		if (filters?.q) {
+			const q = filters.q.toLowerCase();
+			people = people.filter(
+				(p) =>
+					p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q),
+			);
+		}
+		return people;
+	},
+
+	/** Public sign-up; always creates a requester. */
+	async registerPerson(body: {
+		name: string;
+		email: string;
+		phone: string;
+		password: string;
+	}): Promise<Person> {
+		if (!isMockMode()) {
+			return await apiRequest<Person>("/auth/register", {
+				method: "POST",
+				body: JSON.stringify(body),
+				skipAuthRefresh: true,
+			});
+		}
+		const people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		if (
+			people.some((p) => p.email.toLowerCase() === body.email.toLowerCase())
+		) {
+			throw new Error("An account with this email already exists.");
+		}
+		const person: Person = {
+			id: `p-${Date.now()}`,
+			name: body.name,
+			email: body.email,
+			phone: body.phone,
+			role: "requester",
+		};
+		setStore(KEYS.PEOPLE, [person, ...people]);
+		return person;
+	},
+
+	/** Admin-only: set an existing person's role (never `admin`). */
+	async assignRole(
+		personId: string,
+		assignment: {
+			role: Exclude<Role, "admin">;
+			departmentId: string | null;
+			vendorId: string | null;
+		},
+	): Promise<Person> {
+		if (!isMockMode()) {
+			return await apiRequest<Person>(`/people/${personId}/role`, {
+				method: "PUT",
+				body: JSON.stringify(assignment),
+			});
+		}
+		const people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		const found = people.find((p) => p.id === personId);
+		if (!found) throw new Error("Person not found");
+		Object.assign(found, assignment);
+		setStore(KEYS.PEOPLE, people);
+		return found;
+	},
+
+	/** Admin-only: create another admin with full system privileges. */
+	async createAdminUser(body: {
+		name: string;
+		email: string;
+		phone: string;
+		password: string;
+	}): Promise<Person> {
+		if (!isMockMode()) {
+			return await apiRequest<Person>("/admins", {
+				method: "POST",
+				body: JSON.stringify(body),
+			});
+		}
+		const people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		const person: Person = {
+			id: `p-${Date.now()}`,
+			name: body.name,
+			email: body.email,
+			phone: body.phone,
+			role: "admin",
+		};
+		setStore(KEYS.PEOPLE, [person, ...people]);
+		return person;
+	},
+
+	/** Admin-only: delete/deactivate a person account. */
+	async deletePerson(personId: string): Promise<void> {
+		if (!isMockMode()) {
+			await apiRequest<void>(`/people/${personId}`, {
+				method: "DELETE",
+			});
+			return;
+		}
+		let people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		people = people.filter((p) => p.id !== personId);
+		setStore(KEYS.PEOPLE, people);
+	},
+
+	async getPerson(personId: string): Promise<Person> {
+		if (!isMockMode()) {
+			return await apiRequest<Person>(`/people/${personId}`);
+		}
+		const people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		const found = people.find((p) => p.id === personId);
+		if (!found) throw new Error("Person not found");
+		return found;
+	},
+
+	/**
+	 * Look up the given people one by one. Unlike `listPeople`, this works for
+	 * requesters and assignees, who may read the staff on their tickets (and an
+	 * assignee the requester). Anyone the caller may not see, or who has been
+	 * deleted, is left out.
+	 */
+	async getPeopleByIds(ids: string[]): Promise<Person[]> {
+		const results = await Promise.allSettled(
+			[...new Set(ids)].map((id) => ticketService.getPerson(id)),
+		);
+		return results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
 	},
 
 	async listDepartments(): Promise<Department[]> {
@@ -509,7 +719,7 @@ export const ticketService = {
 			const res = await apiRequest<PageResponse<Department>>("/departments");
 			return res.items;
 		}
-		return INITIAL_DEPARTMENTS;
+		return getStore<Department>(KEYS.DEPARTMENTS, INITIAL_DEPARTMENTS);
 	},
 
 	async listCategories(): Promise<Category[]> {
@@ -517,7 +727,7 @@ export const ticketService = {
 			const res = await apiRequest<PageResponse<Category>>("/categories");
 			return res.items;
 		}
-		return INITIAL_CATEGORIES;
+		return getStore<Category>(KEYS.CATEGORIES, INITIAL_CATEGORIES);
 	},
 
 	async listVendors(): Promise<Vendor[]> {
@@ -525,7 +735,7 @@ export const ticketService = {
 			const res = await apiRequest<PageResponse<Vendor>>("/vendors");
 			return res.items;
 		}
-		return INITIAL_VENDORS;
+		return getStore<Vendor>(KEYS.VENDORS, INITIAL_VENDORS);
 	},
 
 	async listAssets(): Promise<Asset[]> {
@@ -533,6 +743,194 @@ export const ticketService = {
 			const res = await apiRequest<PageResponse<Asset>>("/assets");
 			return res.items;
 		}
-		return INITIAL_ASSETS;
+		return getStore<Asset>(KEYS.ASSETS, INITIAL_ASSETS);
+	},
+
+	async getAsset(assetId: string): Promise<Asset> {
+		if (!isMockMode()) {
+			return await apiRequest<Asset>(`/assets/${assetId}`);
+		}
+		const found = getStore<Asset>(KEYS.ASSETS, INITIAL_ASSETS).find(
+			(a) => a.id === assetId,
+		);
+		if (!found) throw new Error("Asset not found");
+		return found;
+	},
+
+	// --- Directory management (departments, vendors and categories are
+	// admin-only; assets are managed by supervisors for their own department).
+
+	async createDepartment(name: string): Promise<Department> {
+		return createNamed<Department>(
+			"/departments",
+			KEYS.DEPARTMENTS,
+			INITIAL_DEPARTMENTS,
+			name,
+		);
+	},
+	async deleteDepartment(id: string): Promise<void> {
+		return deleteNamed(
+			"/departments",
+			KEYS.DEPARTMENTS,
+			INITIAL_DEPARTMENTS,
+			id,
+		);
+	},
+	async createVendor(name: string): Promise<Vendor> {
+		return createNamed<Vendor>("/vendors", KEYS.VENDORS, INITIAL_VENDORS, name);
+	},
+	async deleteVendor(id: string): Promise<void> {
+		return deleteNamed("/vendors", KEYS.VENDORS, INITIAL_VENDORS, id);
+	},
+	async createCategory(name: string): Promise<Category> {
+		return createNamed<Category>(
+			"/categories",
+			KEYS.CATEGORIES,
+			INITIAL_CATEGORIES,
+			name,
+		);
+	},
+	async deleteCategory(id: string): Promise<void> {
+		return deleteNamed("/categories", KEYS.CATEGORIES, INITIAL_CATEGORIES, id);
+	},
+
+	/** `departmentId` is required for admins; supervisors always use their own. */
+	async createAsset(body: {
+		name: string;
+		categoryId: string;
+		departmentId?: string;
+	}): Promise<Asset> {
+		if (!isMockMode()) {
+			return await apiRequest<Asset>("/assets", {
+				method: "POST",
+				body: JSON.stringify(body),
+			});
+		}
+		const assets = getStore<Asset>(KEYS.ASSETS, INITIAL_ASSETS);
+		const asset: Asset = {
+			id: `a-${Date.now()}`,
+			name: body.name,
+			categoryId: body.categoryId,
+			departmentId: body.departmentId ?? "",
+		};
+		setStore(KEYS.ASSETS, [...assets, asset]);
+		return asset;
+	},
+
+	async updateAsset(
+		assetId: string,
+		body: { name?: string; categoryId?: string },
+	): Promise<Asset> {
+		if (!isMockMode()) {
+			return await apiRequest<Asset>(`/assets/${assetId}`, {
+				method: "PATCH",
+				body: JSON.stringify(body),
+			});
+		}
+		const assets = getStore<Asset>(KEYS.ASSETS, INITIAL_ASSETS);
+		const found = assets.find((a) => a.id === assetId);
+		if (!found) throw new Error("Asset not found");
+		Object.assign(found, body);
+		setStore(KEYS.ASSETS, assets);
+		return found;
+	},
+
+	/** Fails with 409 while tickets still refer to the asset. */
+	async deleteAsset(assetId: string): Promise<void> {
+		if (!isMockMode()) {
+			await apiRequest<void>(`/assets/${assetId}`, { method: "DELETE" });
+			return;
+		}
+		const assets = getStore<Asset>(KEYS.ASSETS, INITIAL_ASSETS);
+		setStore(
+			KEYS.ASSETS,
+			assets.filter((a) => a.id !== assetId),
+		);
+	},
+
+	/** The vendors responsible for an asset. */
+	async listAssetVendors(assetId: string): Promise<Vendor[]> {
+		if (!isMockMode()) {
+			return await apiRequest<Vendor[]>(`/assets/${assetId}/vendors`);
+		}
+		const links = getStore<{ assetId: string; vendorId: string }>(
+			KEYS.ASSET_VENDORS,
+			[],
+		);
+		const vendors = getStore<Vendor>(KEYS.VENDORS, INITIAL_VENDORS);
+		return vendors.filter((v) =>
+			links.some((l) => l.assetId === assetId && l.vendorId === v.id),
+		);
+	},
+
+	async addAssetVendor(assetId: string, vendorId: string): Promise<void> {
+		if (!isMockMode()) {
+			await apiRequest<void>(`/assets/${assetId}/vendors/${vendorId}`, {
+				method: "PUT",
+			});
+			return;
+		}
+		const links = getStore<{ assetId: string; vendorId: string }>(
+			KEYS.ASSET_VENDORS,
+			[],
+		);
+		if (!links.some((l) => l.assetId === assetId && l.vendorId === vendorId)) {
+			setStore(KEYS.ASSET_VENDORS, [...links, { assetId, vendorId }]);
+		}
+	},
+
+	async removeAssetVendor(assetId: string, vendorId: string): Promise<void> {
+		if (!isMockMode()) {
+			await apiRequest<void>(`/assets/${assetId}/vendors/${vendorId}`, {
+				method: "DELETE",
+			});
+			return;
+		}
+		const links = getStore<{ assetId: string; vendorId: string }>(
+			KEYS.ASSET_VENDORS,
+			[],
+		);
+		setStore(
+			KEYS.ASSET_VENDORS,
+			links.filter((l) => !(l.assetId === assetId && l.vendorId === vendorId)),
+		);
 	},
 };
+
+/** POST a `{ name }` record, or add one to the mock store. */
+async function createNamed<T extends { id: string; name: string }>(
+	endpoint: string,
+	key: string,
+	initial: T[],
+	name: string,
+): Promise<T> {
+	if (!isMockMode()) {
+		return await apiRequest<T>(endpoint, {
+			method: "POST",
+			body: JSON.stringify({ name }),
+		});
+	}
+	const items = getStore<T>(key, initial);
+	if (items.some((i) => i.name.toLowerCase() === name.toLowerCase())) {
+		throw new Error(`"${name}" already exists.`);
+	}
+	const created = { id: `n-${Date.now()}`, name } as T;
+	setStore(key, [...items, created]);
+	return created;
+}
+
+async function deleteNamed<T extends { id: string }>(
+	endpoint: string,
+	key: string,
+	initial: T[],
+	id: string,
+): Promise<void> {
+	if (!isMockMode()) {
+		await apiRequest<void>(`${endpoint}/${id}`, { method: "DELETE" });
+		return;
+	}
+	setStore(
+		key,
+		getStore<T>(key, initial).filter((i) => i.id !== id),
+	);
+}

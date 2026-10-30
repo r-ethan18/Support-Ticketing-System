@@ -1,0 +1,111 @@
+---
+# Deployment for the FastAPI backend (python -m backend, port 8000).
+# Image is overridden by the production overlay to the tagged GHCR image.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    app: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        # Matched by the PodMonitor and NetworkPolicy in k8s/monitoring/.
+        app.kubernetes.io/name: sts-backend
+    spec:
+      containers:
+        - name: backend
+          # Placeholder — the production overlay replaces this with the real tag.
+          image: ghcr.io/r-ethan18/support-ticketing-system-backend:latest
+          ports:
+            - containerPort: 8000
+              name: http
+            # Prometheus metrics (METRICS_PORT, default 9100). Deliberately not
+            # in the Service, so the ingress can never route to it.
+            - containerPort: 9100
+              name: metrics
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: DB_HOST
+              value: db
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: sts-secrets
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: sts-secrets
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sts-secrets
+                  key: DB_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sts-secrets
+                  key: JWT_SECRET
+            # Required: the backend refuses to start on an empty database
+            # without them, since it needs a first admin to assign roles.
+            # No `optional: true`, so a missing key fails the pod at creation.
+            - name: ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: sts-secrets
+                  key: ADMIN_EMAIL
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sts-secrets
+                  key: ADMIN_PASSWORD
+          # FastAPI exposes /openapi.json at the application root (port 8000).
+          # This is a stable, side-effect-free GET that does not require auth,
+          # making it a reliable readiness target.
+          readinessProbe:
+            httpGet:
+              path: /openapi.json
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /openapi.json
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+# ClusterIP Service for the backend, used by the Ingress and other pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  labels:
+    app: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http

@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from backend.accounts import ensure_admin
 from backend.config import get_settings
 from backend.metrics import serve_metrics
+from backend.pubsub import PubSubHub, get_hub_instance
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -37,6 +38,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.db_pool = pool
         with serve_metrics(pool):
             yield
+        app.state.pub_sub = get_hub_instance()
+        yield
     finally:
         await pool.close()
 
@@ -46,6 +49,13 @@ def get_pool(request: Request) -> AsyncConnectionPool:
 
 
 PoolDep = Annotated[AsyncConnectionPool, Depends(get_pool)]
+
+
+def get_hub(request: Request) -> PubSubHub:
+    return request.app.state.pub_sub
+
+
+HubDep = Annotated[PubSubHub, Depends(get_hub)]
 
 
 def like_pattern(text: str) -> str:

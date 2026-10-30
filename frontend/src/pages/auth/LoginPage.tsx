@@ -1,47 +1,89 @@
 import {
 	AlertCircle,
-	CheckCircle,
+	CheckCircle2,
 	Eye,
 	EyeOff,
 	LifeBuoy,
 	Lock,
 	Mail,
-	ShieldCheck,
+	Phone,
+	User,
 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../components/common/Button";
 import { Input } from "../../components/common/Input";
+import { ThemeToggle } from "../../components/common/ThemeToggle";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
-import type { Role } from "../../types/api";
+import type { Person } from "../../types/api";
 
 export function LoginPage() {
-	const { login, switchRole, mockMode, toggleMockMode } = useAuth();
+	const { login, register } = useAuth();
 	const { showToast } = useToast();
 	const navigate = useNavigate();
 
-	const [email, setEmail] = useState("jane.requester@example.com");
-	const [password, setPassword] = useState("Password123!");
+	const [mode, setMode] = useState<"signin" | "signup">("signin");
+	const [name, setName] = useState("");
+	const [phone, setPhone] = useState("");
+	const [email, setEmail] = useState("");
+	const [password, setPassword] = useState("");
+	const [confirmPassword, setConfirmPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	const handleLogin = async (e: FormEvent) => {
+	const switchMode = (next: "signin" | "signup") => {
+		setMode(next);
+		setError(null);
+		setEmail("");
+		setPassword("");
+		setConfirmPassword("");
+		setName("");
+		setPhone("");
+	};
+
+	const handleSubmit = async (e: FormEvent) => {
 		e.preventDefault();
 		setError(null);
+
+		if (mode === "signup") {
+			if (password.length < 12) {
+				setError("Password must be at least 12 characters.");
+				return;
+			}
+			if (password !== confirmPassword) {
+				setError("Passwords do not match.");
+				return;
+			}
+		}
+
 		setLoading(true);
 
 		try {
-			await login(email, password);
-			showToast("Authenticated successfully. Welcome back!", "success");
+			let person: Person;
+			if (mode === "signup") {
+				person = await register({
+					name: name.trim(),
+					email: email.trim(),
+					phone: phone.trim() || "+1-555-0100",
+					password,
+				});
+				showToast(
+					`Account created for ${person.name}. Roles are assigned by an administrator.`,
+					"success",
+				);
+			} else {
+				person = await login(email.trim(), password);
+				showToast(`Welcome back, ${person.name}!`, "success");
+			}
 
-			// Route based on role
-			if (email.includes("admin")) {
+			// Route based on authenticated server role
+			if (person.role === "admin") {
 				navigate("/admin/dashboard");
-			} else if (email.includes("supervisor")) {
+			} else if (person.role === "supervisor") {
 				navigate("/supervisor/dashboard");
-			} else if (email.includes("assignee")) {
+			} else if (person.role === "assignee") {
 				navigate("/assignee/tickets");
 			} else {
 				navigate("/requester/dashboard");
@@ -50,25 +92,20 @@ export function LoginPage() {
 			setError(
 				err instanceof Error
 					? err.message
-					: "Failed to authenticate. Check server connection.",
+					: "Authentication failed. Please verify credentials.",
 			);
 		} finally {
 			setLoading(false);
 		}
 	};
 
-	const quickFillPersona = (role: Role, mail: string) => {
-		setEmail(mail);
-		setPassword("Password123!");
-		setError(null);
-		if (mockMode) {
-			switchRole(role);
-			showToast(`Loaded ${role.toUpperCase()} persona credentials`, "info");
-		}
-	};
-
 	return (
 		<div className="login-page">
+			{/* Top Bar with Theme Toggle */}
+			<div className="login-top-bar">
+				<ThemeToggle showLabel />
+			</div>
+
 			<div className="login-card-container">
 				<div className="login-header">
 					<div className="login-brand-icon">
@@ -76,59 +113,32 @@ export function LoginPage() {
 					</div>
 					<h2 className="login-title">SupportDesk Enterprise</h2>
 					<p className="login-subtitle">
-						Sign in to manage service requests, dispatch assignees, and track
-						incidents.
+						{mode === "signin"
+							? "Sign in to access your ticketing console, work orders, and services."
+							: "Create your employee account. Roles are assigned by system administrators."}
 					</p>
 				</div>
 
-				{/* Quick Fill Demo Accounts */}
-				<div className="demo-accounts-panel">
-					<div className="demo-panel-header">
-						<ShieldCheck size={14} className="text-primary" />
-						<span>1-CLICK DEMO PERSONAS</span>
-					</div>
-					<div className="demo-persona-grid">
-						<button
-							type="button"
-							className={`demo-persona-btn ${email.includes("requester") ? "selected" : ""}`}
-							onClick={() =>
-								quickFillPersona("requester", "jane.requester@example.com")
-							}
-						>
-							<span className="persona-role">Requester</span>
-							<span className="persona-name">Jane Doe</span>
-						</button>
-						<button
-							type="button"
-							className={`demo-persona-btn ${email.includes("assignee") ? "selected" : ""}`}
-							onClick={() =>
-								quickFillPersona("assignee", "alex.assignee@example.com")
-							}
-						>
-							<span className="persona-role">Assignee</span>
-							<span className="persona-name">Alex Rivera</span>
-						</button>
-						<button
-							type="button"
-							className={`demo-persona-btn ${email.includes("supervisor") ? "selected" : ""}`}
-							onClick={() =>
-								quickFillPersona("supervisor", "sarah.supervisor@example.com")
-							}
-						>
-							<span className="persona-role">Supervisor</span>
-							<span className="persona-name">Sarah Chen</span>
-						</button>
-						<button
-							type="button"
-							className={`demo-persona-btn ${email.includes("admin") ? "selected" : ""}`}
-							onClick={() =>
-								quickFillPersona("admin", "marcus.admin@example.com")
-							}
-						>
-							<span className="persona-role">Administrator</span>
-							<span className="persona-name">Marcus Vance</span>
-						</button>
-					</div>
+				{/* Mode Tabs */}
+				<div className="login-mode-tabs" role="tablist">
+					<button
+						type="button"
+						role="tab"
+						aria-selected={mode === "signin"}
+						className={`login-tab-btn ${mode === "signin" ? "active" : ""}`}
+						onClick={() => switchMode("signin")}
+					>
+						Sign In
+					</button>
+					<button
+						type="button"
+						role="tab"
+						aria-selected={mode === "signup"}
+						className={`login-tab-btn ${mode === "signup" ? "active" : ""}`}
+						onClick={() => switchMode("signup")}
+					>
+						Register
+					</button>
 				</div>
 
 				{error && (
@@ -138,13 +148,38 @@ export function LoginPage() {
 					</div>
 				)}
 
-				<form onSubmit={handleLogin} className="login-form">
+				<form onSubmit={handleSubmit} className="login-form">
+					{mode === "signup" && (
+						<>
+							<Input
+								id="signup-name"
+								name="name"
+								label="Full Name"
+								placeholder="e.g. John Doe"
+								value={name}
+								onChange={(e) => setName(e.target.value)}
+								required
+								leftIcon={<User size={16} />}
+							/>
+							<Input
+								id="signup-phone"
+								name="phone"
+								type="tel"
+								label="Phone Number"
+								placeholder="+1 (555) 234-5678"
+								value={phone}
+								onChange={(e) => setPhone(e.target.value)}
+								leftIcon={<Phone size={16} />}
+							/>
+						</>
+					)}
+
 					<Input
 						id="login-email"
 						name="email"
 						type="email"
 						label="Work Email"
-						placeholder="name@company.com"
+						placeholder="user@example.com"
 						value={email}
 						onChange={(e) => setEmail(e.target.value)}
 						required
@@ -155,8 +190,11 @@ export function LoginPage() {
 						id="login-password"
 						name="password"
 						type={showPassword ? "text" : "password"}
-						label="Password"
+						label={
+							mode === "signup" ? "Password (min. 12 characters)" : "Password"
+						}
 						placeholder="••••••••••••"
+						minLength={mode === "signup" ? 12 : undefined}
 						value={password}
 						onChange={(e) => setPassword(e.target.value)}
 						required
@@ -173,18 +211,32 @@ export function LoginPage() {
 						}
 					/>
 
-					<div className="login-options">
-						<label className="remember-checkbox">
-							<input
-								type="checkbox"
-								checked={mockMode}
-								onChange={(e) => toggleMockMode(e.target.checked)}
+					{mode === "signup" && (
+						<>
+							<Input
+								id="signup-confirm-password"
+								name="confirmPassword"
+								type={showPassword ? "text" : "password"}
+								label="Confirm Password"
+								placeholder="••••••••••••"
+								minLength={12}
+								value={confirmPassword}
+								onChange={(e) => setConfirmPassword(e.target.value)}
+								required
+								leftIcon={<Lock size={16} />}
 							/>
-							<span className="text-sm">
-								Enable Demo Mock Mode (recommended if backend is 501)
-							</span>
-						</label>
-					</div>
+							<div className="login-role-notice">
+								<CheckCircle2
+									size={15}
+									className="text-primary flex-shrink-0"
+								/>
+								<span>
+									Roles are assigned by an administrator. Newly created accounts
+									have standard requester access until upgraded.
+								</span>
+							</div>
+						</>
+					)}
 
 					<Button
 						type="submit"
@@ -193,16 +245,35 @@ export function LoginPage() {
 						isLoading={loading}
 						className="w-full mt-2"
 					>
-						Sign In to Console
+						{mode === "signup" ? "Create Account" : "Sign In"}
 					</Button>
-				</form>
 
-				<div className="login-footer">
-					<div className="login-status-badge">
-						<CheckCircle size={13} className="text-success" />
-						<span>Vite 8 • Port 3000 • FastAPI /api/v1 aligned</span>
-					</div>
-				</div>
+					<p className="text-sm text-center mt-3 text-secondary">
+						{mode === "signup" ? (
+							<>
+								Already have an account?{" "}
+								<button
+									type="button"
+									className="link-button font-semibold"
+									onClick={() => switchMode("signin")}
+								>
+									Sign in
+								</button>
+							</>
+						) : (
+							<>
+								Don&apos;t have an account?{" "}
+								<button
+									type="button"
+									className="link-button font-semibold"
+									onClick={() => switchMode("signup")}
+								>
+									Create an account
+								</button>
+							</>
+						)}
+					</p>
+				</form>
 			</div>
 		</div>
 	);

@@ -1,12 +1,12 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.auth import require_roles
+from backend.cascade import remove_department
 from backend.db import (
     PoolDep,
-    delete_by_id,
     fetch_or_404,
     fetch_page,
     insert_named,
@@ -72,9 +72,16 @@ async def create_department(body: DepartmentCreate, pool: PoolDep) -> Department
     "/{department_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a department (admin only)",
-    description="Fails with 409 while people, assets or tickets still refer to it.",
+    description=(
+        "Fails with 409 while the department owns assets. Its supervisors become"
+        " plain requesters."
+    ),
     dependencies=[Depends(require_roles(Role.admin))],
     responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},
 )
 async def delete_department(department_id: UUID, pool: PoolDep) -> None:
-    await delete_by_id(pool, "department", department_id, "Department")
+    async with pool.connection() as conn:
+        if not await remove_department(conn, department_id):
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, detail="Department not found"
+            )

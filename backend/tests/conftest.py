@@ -11,8 +11,10 @@ from backend.config import get_settings
 from backend.credentials import Credential, get_credential_store
 from backend.db import SCHEMA_PATH
 from backend.main import create_app
+from backend.refresh_tokens import get_refresh_token_store
 from backend.schemas.enums import Role
 from backend.security import hash_password
+from backend.throttle import get_throttle
 
 SECRET = "x" * 32
 PASSWORD = "correct horse battery staple"
@@ -24,6 +26,21 @@ class InMemoryStore:
 
     async def get_by_email(self, email: str) -> Credential | None:
         return self._by_email.get(email.lower())
+
+
+class NoThrottle:
+    async def check(self, keys: list[str]) -> None: ...
+
+    async def record_failure(self, keys: list[str]) -> None: ...
+
+    async def record_success(self, keys: list[str]) -> None: ...
+
+
+class InMemoryRefreshTokens:
+    """Enough for login tests that run without a database."""
+
+    async def issue(self, person_id: UUID) -> str:
+        return f"refresh-{person_id}"
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +67,8 @@ def client() -> Iterator[TestClient]:
     )
     app = create_app(with_database=False)
     app.dependency_overrides[get_credential_store] = lambda: store
+    app.dependency_overrides[get_throttle] = NoThrottle
+    app.dependency_overrides[get_refresh_token_store] = InMemoryRefreshTokens
     with TestClient(app) as c:
         yield c
 
