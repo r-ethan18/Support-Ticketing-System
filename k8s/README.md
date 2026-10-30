@@ -88,7 +88,8 @@ k8s/
 └── README.md                  # This file
 
 argocd/
-└── application.yaml           # ArgoCD Application definition
+├── application.yaml           # ArgoCD Application definition
+└── image-updater.yaml         # Image Updater: rolls out new sha-* images
 ```
 
 ---
@@ -103,6 +104,7 @@ argocd/
 | Traefik v3 (IngressClass `traefik`) | Ingress controller |
 | ArgoCD ≥ 2.10 | GitOps sync |
 | Container images published to GHCR | See below |
+| Argo CD Image Updater ≥ 1.0 | Rolls out new images (uses `ImageUpdater` resources) |
 
 ---
 
@@ -156,8 +158,10 @@ Images are published to GHCR by the GitHub Actions workflow
 | Frontend | `ghcr.io/r-ethan18/support-ticketing-system-frontend` |
 
 Tags:
-- `sha-<7-char-commit-sha>` — immutable, used by the production overlay
-- `latest` — always points to the most recent main-branch build
+- `sha-<7-char-commit-sha>` — immutable; Argo CD Image Updater deploys the
+  newest one (see [ArgoCD Installation](#argocd-installation-and-application-setup))
+- `latest` — always points to the most recent main-branch build; only the
+  bootstrap value in the production overlay
 
 ### Manual build (local testing only)
 
@@ -272,9 +276,52 @@ kubectl -n argocd port-forward svc/argocd-server 8080:443
 kubectl apply -f argocd/application.yaml
 ```
 
-ArgoCD will now watch `main` at `k8s/overlays/production`. When the GitHub
-Actions workflow commits updated image tags, ArgoCD detects the change and
-synchronizes the cluster automatically.
+ArgoCD will now watch `main` at `k8s/overlays/production`. Until Image Updater
+is set up (next step) the workloads run the overlay's bootstrap `latest` tag.
+
+### 4. Install Argo CD Image Updater
+
+CI only builds and pushes images; it does not touch git or the cluster.
+Image Updater runs next to Argo CD, polls GHCR (about every two minutes) and
+sets the newest immutable `sha-*` tag on the Application, so a push to `main`
+rolls out without any credentials for the cluster in GitHub.
+
+```bash
+# Same namespace as Argo CD, so the default scope covers the Application.
+# Pin a release (>= 1.0) instead of `stable` for repeatable installs.
+kubectl apply -n argocd \
+  -f https://raw.githubusercontent.com/argoproj-labs/argocd-image-updater/stable/config/install.yaml
+kubectl -n argocd rollout status deploy/argocd-image-updater-controller
+
+# Tell it which Application and images to track
+kubectl apply -f argocd/image-updater.yaml
+```
+
+If the GHCR packages are private, create a pull secret with a token that has
+`read:packages`, and uncomment the `pullSecret` lines in
+`argocd/image-updater.yaml`:
+
+```bash
+kubectl create -n argocd secret docker-registry ghcr-creds \
+  --docker-server=ghcr.io \
+  --docker-username=<github-user> \
+  --docker-password=<token-with-read:packages>
+```
+
+The cluster pods need to pull the images too: public packages need nothing,
+private ones need an `imagePullSecret` in `sts-prod`.
+
+Check that it works:
+
+```bash
+kubectl -n argocd logs deploy/argocd-image-updater-controller | tail
+kubectl -n argocd get imageupdater support-ticketing-system -o yaml   # see status
+kubectl -n argocd get application support-ticketing-system \
+  -o jsonpath='{.spec.source.kustomize.images}'; echo
+```
+
+The override lives on the Application resource, not in git. Re-applying
+`argocd/application.yaml` removes it until the next poll.
 
 ---
 
@@ -347,10 +394,14 @@ argocd app diff support-ticketing-system
 argocd app sync support-ticketing-system
 ```
 
-### `[skip ci]` not working (infinite loop)
-GitHub natively skips workflow runs whose head commit message contains
-`[skip ci]`. If this is not being respected, check Actions settings under
-**Settings → Actions → General**.
+### New images are not rolled out
+Push to `main`, wait for the workflow to push the images, then check:
+```bash
+kubectl -n argocd logs deploy/argocd-image-updater-controller | grep support-ticketing
+```
+Common causes: the GHCR packages are private and no `pullSecret` is set, the
+`ImageUpdater` is not in the same namespace as the Application (`argocd`), or
+the tag does not match `^sha-[0-9a-f]{7}$`.
 
 ---
 
