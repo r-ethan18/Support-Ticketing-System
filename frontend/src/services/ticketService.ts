@@ -11,7 +11,7 @@ import type {
 	TicketComment,
 	TicketCreate,
 	TicketPriority,
-	TicketStatus,
+	TicketStatusFilter,
 	TicketStatusHistoryEntry,
 	TicketUpdate,
 	Vendor,
@@ -131,7 +131,7 @@ export function resetMockData(): void {
 }
 
 export interface TicketFilters {
-	status?: TicketStatus[];
+	status?: TicketStatusFilter[];
 	priority?: TicketPriority[];
 	requesterId?: string;
 	assigneeId?: string;
@@ -189,8 +189,32 @@ export const ticketService = {
 			tickets = tickets.filter((t) => assignedTicketIds.has(t.id));
 		}
 
+		const mockComments = getStore<TicketComment>(
+			KEYS.COMMENTS,
+			INITIAL_COMMENTS,
+		);
+		tickets = tickets.map((t) => {
+			if (t.status !== "closed") return { ...t, reopenRequested: false };
+			const tComments = mockComments.filter(
+				(c) => c.ticketId === t.id && c.body.trim().startsWith("[Reopen"),
+			);
+			const last = tComments[tComments.length - 1];
+			const isReopenReq = last
+				? last.body.trim().startsWith("[Reopen Requested]:")
+				: false;
+			return { ...t, reopenRequested: isReopenReq };
+		});
+
 		if (filters.status && filters.status.length > 0) {
-			tickets = tickets.filter((t) => filters.status?.includes(t.status));
+			const hasReopenReq = filters.status.includes("reopen_requested");
+			const regularStatuses = filters.status.filter(
+				(s) => s !== "reopen_requested",
+			);
+			tickets = tickets.filter((t) => {
+				if (hasReopenReq && t.reopenRequested) return true;
+				if (regularStatuses.includes(t.status)) return true;
+				return false;
+			});
 		}
 
 		if (filters.priority && filters.priority.length > 0) {

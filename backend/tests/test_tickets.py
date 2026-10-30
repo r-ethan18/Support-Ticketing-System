@@ -276,3 +276,75 @@ def test_only_admin_deletes(db_client: TestClient, seed: Seeder) -> None:
     assert db_client.delete(url, headers=admin).status_code == 204
     assert db_client.get(url, headers=admin).status_code == 404
     assert db_client.delete(url, headers=admin).status_code == 404
+
+
+def test_supervisor_or_admin_can_reopen_closed_ticket(
+    db_client: TestClient, seed: Seeder
+) -> None:
+    _, owner = login_as(db_client, seed, Role.requester)
+    _, supervisor = login_as(db_client, seed, Role.supervisor)
+    ticket_id = make_ticket(db_client, owner, seed)["id"]
+    url = f"{API}/{ticket_id}"
+
+    # Close ticket
+    closed = db_client.patch(url, json={"status": "closed"}, headers=supervisor)
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "closed"
+    assert closed.json()["closedAt"] is not None
+
+    # Requester cannot reopen (403)
+    assert (
+        db_client.patch(url, json={"status": "open"}, headers=owner).status_code == 403
+    )
+
+    # Supervisor reopens ticket
+    reopened = db_client.patch(url, json={"status": "open"}, headers=supervisor)
+    assert reopened.status_code == 200
+    assert reopened.json()["status"] == "open"
+    assert reopened.json()["closedAt"] is None
+
+    # Check history logs from closed to open
+    history = db_client.get(f"{url}/status-history", headers=owner).json()
+    assert (history[-1]["fromStatus"], history[-1]["toStatus"]) == ("closed", "open")
+
+
+def test_reopen_requested_status_and_filtering(
+    db_client: TestClient, seed: Seeder
+) -> None:
+    _, owner = login_as(db_client, seed, Role.requester)
+    _, admin = login_as(db_client, seed, Role.admin)
+    ticket_id = make_ticket(db_client, owner, seed)["id"]
+    url = f"{API}/{ticket_id}"
+
+    # Close ticket
+    db_client.patch(url, json={"status": "closed"}, headers=owner)
+    ticket = db_client.get(url, headers=owner).json()
+    assert ticket["status"] == "closed"
+    assert ticket["reopenRequested"] is False
+
+    # Requester posts reopen request in chats
+    res = db_client.post(
+        f"{url}/comments",
+        json={"body": "[Reopen Requested]: Please look into this again"},
+        headers=owner,
+    )
+    assert res.status_code == 201
+
+    # Now ticket has reopenRequested = True
+    ticket = db_client.get(url, headers=owner).json()
+    assert ticket["status"] == "closed"
+    assert ticket["reopenRequested"] is True
+
+    # Filter by reopen_requested
+    filtered = db_client.get(f"{API}?status=reopen_requested", headers=admin).json()
+    assert any(t["id"] == ticket_id for t in filtered["items"])
+
+    # Once supervisor/admin approves and reopens, reopenRequested becomes False
+    db_client.patch(url, json={"status": "open"}, headers=admin)
+    ticket = db_client.get(url, headers=owner).json()
+    assert ticket["status"] == "open"
+    assert ticket["reopenRequested"] is False
+    filtered_after = db_client.get(
+        f"{API}?status=reopen_requested", headers=admin
+    ).json()
+    assert not any(t["id"] == ticket_id for t in filtered_after["items"])

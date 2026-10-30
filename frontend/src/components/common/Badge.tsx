@@ -1,10 +1,15 @@
 import type { ReactNode } from "react";
-import type { Role, TicketPriority, TicketStatus } from "../../types/api";
+import type {
+	Role,
+	TicketPriority,
+	TicketStatus,
+	TicketStatusFilter,
+} from "../../types/api";
 
 interface BadgeProps {
 	children: ReactNode;
 	variant?: "default" | "status" | "priority" | "role" | "neutral";
-	status?: TicketStatus;
+	status?: TicketStatusFilter;
 	priority?: TicketPriority;
 	role?: Role;
 	size?: "sm" | "md";
@@ -37,23 +42,30 @@ export function Badge({
 
 export function StatusBadge({
 	status,
+	reopenRequested,
 	size = "md",
 }: {
-	status: TicketStatus;
+	status: TicketStatus | "reopen_requested";
+	reopenRequested?: boolean;
 	size?: "sm" | "md";
 }) {
-	const labels: Record<TicketStatus, string> = {
+	const effectiveStatus: TicketStatusFilter = reopenRequested
+		? "reopen_requested"
+		: status;
+
+	const labels: Record<TicketStatusFilter, string> = {
 		open: "Open",
 		assigned: "Assigned",
 		in_progress: "In Progress",
 		resolved: "Resolved",
 		closed: "Closed",
+		reopen_requested: "Reopen Requested",
 	};
 
 	return (
-		<Badge variant="status" status={status} size={size}>
+		<Badge variant="status" status={effectiveStatus} size={size}>
 			<span className="badge-dot" />
-			<span>{labels[status]}</span>
+			<span>{labels[effectiveStatus]}</span>
 		</Badge>
 	);
 }

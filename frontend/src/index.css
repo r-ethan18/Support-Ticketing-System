@@ -1020,6 +1020,22 @@ body {
 	border-color: var(--status-closed-border);
 }
 
+.badge-status-reopen_requested {
+	background-color: rgba(245, 158, 11, 0.12);
+	color: #d97706;
+	border-color: rgba(245, 158, 11, 0.35);
+}
+
+.badge-status-reopen_requested .badge-dot {
+	background-color: #f59e0b;
+}
+
+.dark .badge-status-reopen_requested {
+	background-color: rgba(245, 158, 11, 0.2);
+	color: #fbbf24;
+	border-color: rgba(245, 158, 11, 0.45);
+}
+
 .badge-priority-critical {
 	background-color: var(--priority-critical-bg);
 	color: var(--priority-critical-text);
@@ -1921,6 +1937,72 @@ body {
 .asset-val {
 	font-weight: 600;
 	color: var(--text-primary);
+}
+
+/* Reopening Request Banner & Cards */
+.reopen-request-card {
+	background-color: var(--warning-subtle, rgba(245, 158, 11, 0.08));
+	border: 1px solid var(--warning, #f59e0b);
+	border-radius: var(--radius-md);
+	padding: 14px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.reopen-request-card.supervisor-view {
+	background-color: var(--primary-subtle, rgba(59, 130, 246, 0.08));
+	border-color: var(--primary, #3b82f6);
+}
+
+.reopen-card-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 0.88rem;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.reopen-card-body {
+	font-size: 0.82rem;
+	line-height: 1.5;
+	color: var(--text-secondary);
+}
+
+.reopen-quote-box {
+	background-color: var(--bg-surface);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-sm);
+	padding: 8px 12px;
+	font-size: 0.82rem;
+	font-style: italic;
+	color: var(--text-primary);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.reopen-actions-row {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 4px;
+}
+
+.reopen-comment-badge-wrap {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.reopen-comment-tag {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 0.72rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
 }
 
 /* Supervisor & Admin Components */

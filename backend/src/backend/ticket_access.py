@@ -12,9 +12,18 @@ from backend.schemas.tickets import Ticket
 
 # `ticket` is aliased `t` and `asset` is LEFT JOINed as `a` wherever this is used.
 TICKET_FROM = "ticket t LEFT JOIN asset a ON a.id = t.asset_id"
+REOPEN_REQUESTED_SQL = (
+    "(t.status = 'closed' AND EXISTS ("
+    " SELECT 1 FROM ("
+    "   SELECT body FROM ticket_comment tc"
+    "   WHERE tc.ticket_id = t.id AND tc.body LIKE '[Reopen%%'"
+    "   ORDER BY tc.created_at DESC, tc.id DESC LIMIT 1"
+    " ) last_rc WHERE last_rc.body LIKE '[Reopen Requested]%%'"
+    "))"
+)
 TICKET_COLUMNS = (
     "t.id, t.title, t.description, t.location, t.priority, t.status, t.created_at,"
-    " t.closed_at, t.requester_id, t.asset_id, t.supervisor_id"
+    f" t.closed_at, t.requester_id, t.asset_id, t.supervisor_id, {REOPEN_REQUESTED_SQL} AS reopen_requested"
 )
 
 
