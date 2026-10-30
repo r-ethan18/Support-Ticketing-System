@@ -38,6 +38,11 @@ const KEYS = {
 	ATTACHMENTS: "sts_mock_attachments",
 	STATUS_HISTORY: "sts_mock_status_history",
 	PEOPLE: "sts_mock_people",
+	DEPARTMENTS: "sts_mock_departments",
+	VENDORS: "sts_mock_vendors",
+	CATEGORIES: "sts_mock_categories",
+	ASSETS: "sts_mock_assets",
+	ASSET_VENDORS: "sts_mock_asset_vendors",
 	MOCK_MODE: "sts_use_mock_mode",
 };
 
@@ -90,6 +95,11 @@ export function resetMockData(): void {
 			JSON.stringify(INITIAL_STATUS_HISTORY),
 		);
 		localStorage.setItem(KEYS.PEOPLE, JSON.stringify(INITIAL_PEOPLE));
+		localStorage.setItem(KEYS.DEPARTMENTS, JSON.stringify(INITIAL_DEPARTMENTS));
+		localStorage.setItem(KEYS.VENDORS, JSON.stringify(INITIAL_VENDORS));
+		localStorage.setItem(KEYS.CATEGORIES, JSON.stringify(INITIAL_CATEGORIES));
+		localStorage.setItem(KEYS.ASSETS, JSON.stringify(INITIAL_ASSETS));
+		localStorage.removeItem(KEYS.ASSET_VENDORS);
 	} catch {
 		// Ignore
 	}
@@ -691,7 +701,7 @@ export const ticketService = {
 			const res = await apiRequest<PageResponse<Department>>("/departments");
 			return res.items;
 		}
-		return INITIAL_DEPARTMENTS;
+		return getStore<Department>(KEYS.DEPARTMENTS, INITIAL_DEPARTMENTS);
 	},
 
 	async listCategories(): Promise<Category[]> {
@@ -699,7 +709,7 @@ export const ticketService = {
 			const res = await apiRequest<PageResponse<Category>>("/categories");
 			return res.items;
 		}
-		return INITIAL_CATEGORIES;
+		return getStore<Category>(KEYS.CATEGORIES, INITIAL_CATEGORIES);
 	},
 
 	async listVendors(): Promise<Vendor[]> {
@@ -707,7 +717,7 @@ export const ticketService = {
 			const res = await apiRequest<PageResponse<Vendor>>("/vendors");
 			return res.items;
 		}
-		return INITIAL_VENDORS;
+		return getStore<Vendor>(KEYS.VENDORS, INITIAL_VENDORS);
 	},
 
 	async listAssets(): Promise<Asset[]> {
@@ -715,15 +725,194 @@ export const ticketService = {
 			const res = await apiRequest<PageResponse<Asset>>("/assets");
 			return res.items;
 		}
-		return INITIAL_ASSETS;
+		return getStore<Asset>(KEYS.ASSETS, INITIAL_ASSETS);
 	},
 
 	async getAsset(assetId: string): Promise<Asset> {
 		if (!isMockMode()) {
 			return await apiRequest<Asset>(`/assets/${assetId}`);
 		}
-		const found = INITIAL_ASSETS.find((a) => a.id === assetId);
+		const found = getStore<Asset>(KEYS.ASSETS, INITIAL_ASSETS).find(
+			(a) => a.id === assetId,
+		);
 		if (!found) throw new Error("Asset not found");
 		return found;
 	},
+
+	// --- Directory management (departments, vendors and categories are
+	// admin-only; assets are managed by supervisors for their own department).
+
+	async createDepartment(name: string): Promise<Department> {
+		return createNamed<Department>(
+			"/departments",
+			KEYS.DEPARTMENTS,
+			INITIAL_DEPARTMENTS,
+			name,
+		);
+	},
+	async deleteDepartment(id: string): Promise<void> {
+		return deleteNamed(
+			"/departments",
+			KEYS.DEPARTMENTS,
+			INITIAL_DEPARTMENTS,
+			id,
+		);
+	},
+	async createVendor(name: string): Promise<Vendor> {
+		return createNamed<Vendor>("/vendors", KEYS.VENDORS, INITIAL_VENDORS, name);
+	},
+	async deleteVendor(id: string): Promise<void> {
+		return deleteNamed("/vendors", KEYS.VENDORS, INITIAL_VENDORS, id);
+	},
+	async createCategory(name: string): Promise<Category> {
+		return createNamed<Category>(
+			"/categories",
+			KEYS.CATEGORIES,
+			INITIAL_CATEGORIES,
+			name,
+		);
+	},
+	async deleteCategory(id: string): Promise<void> {
+		return deleteNamed("/categories", KEYS.CATEGORIES, INITIAL_CATEGORIES, id);
+	},
+
+	/** `departmentId` is required for admins; supervisors always use their own. */
+	async createAsset(body: {
+		name: string;
+		categoryId: string;
+		departmentId?: string;
+	}): Promise<Asset> {
+		if (!isMockMode()) {
+			return await apiRequest<Asset>("/assets", {
+				method: "POST",
+				body: JSON.stringify(body),
+			});
+		}
+		const assets = getStore<Asset>(KEYS.ASSETS, INITIAL_ASSETS);
+		const asset: Asset = {
+			id: `a-${Date.now()}`,
+			name: body.name,
+			categoryId: body.categoryId,
+			departmentId: body.departmentId ?? "",
+		};
+		setStore(KEYS.ASSETS, [...assets, asset]);
+		return asset;
+	},
+
+	async updateAsset(
+		assetId: string,
+		body: { name?: string; categoryId?: string },
+	): Promise<Asset> {
+		if (!isMockMode()) {
+			return await apiRequest<Asset>(`/assets/${assetId}`, {
+				method: "PATCH",
+				body: JSON.stringify(body),
+			});
+		}
+		const assets = getStore<Asset>(KEYS.ASSETS, INITIAL_ASSETS);
+		const found = assets.find((a) => a.id === assetId);
+		if (!found) throw new Error("Asset not found");
+		Object.assign(found, body);
+		setStore(KEYS.ASSETS, assets);
+		return found;
+	},
+
+	/** Fails with 409 while tickets still refer to the asset. */
+	async deleteAsset(assetId: string): Promise<void> {
+		if (!isMockMode()) {
+			await apiRequest<void>(`/assets/${assetId}`, { method: "DELETE" });
+			return;
+		}
+		const assets = getStore<Asset>(KEYS.ASSETS, INITIAL_ASSETS);
+		setStore(
+			KEYS.ASSETS,
+			assets.filter((a) => a.id !== assetId),
+		);
+	},
+
+	/** The vendors responsible for an asset. */
+	async listAssetVendors(assetId: string): Promise<Vendor[]> {
+		if (!isMockMode()) {
+			return await apiRequest<Vendor[]>(`/assets/${assetId}/vendors`);
+		}
+		const links = getStore<{ assetId: string; vendorId: string }>(
+			KEYS.ASSET_VENDORS,
+			[],
+		);
+		const vendors = getStore<Vendor>(KEYS.VENDORS, INITIAL_VENDORS);
+		return vendors.filter((v) =>
+			links.some((l) => l.assetId === assetId && l.vendorId === v.id),
+		);
+	},
+
+	async addAssetVendor(assetId: string, vendorId: string): Promise<void> {
+		if (!isMockMode()) {
+			await apiRequest<void>(`/assets/${assetId}/vendors/${vendorId}`, {
+				method: "PUT",
+			});
+			return;
+		}
+		const links = getStore<{ assetId: string; vendorId: string }>(
+			KEYS.ASSET_VENDORS,
+			[],
+		);
+		if (!links.some((l) => l.assetId === assetId && l.vendorId === vendorId)) {
+			setStore(KEYS.ASSET_VENDORS, [...links, { assetId, vendorId }]);
+		}
+	},
+
+	async removeAssetVendor(assetId: string, vendorId: string): Promise<void> {
+		if (!isMockMode()) {
+			await apiRequest<void>(`/assets/${assetId}/vendors/${vendorId}`, {
+				method: "DELETE",
+			});
+			return;
+		}
+		const links = getStore<{ assetId: string; vendorId: string }>(
+			KEYS.ASSET_VENDORS,
+			[],
+		);
+		setStore(
+			KEYS.ASSET_VENDORS,
+			links.filter((l) => !(l.assetId === assetId && l.vendorId === vendorId)),
+		);
+	},
 };
+
+/** POST a `{ name }` record, or add one to the mock store. */
+async function createNamed<T extends { id: string; name: string }>(
+	endpoint: string,
+	key: string,
+	initial: T[],
+	name: string,
+): Promise<T> {
+	if (!isMockMode()) {
+		return await apiRequest<T>(endpoint, {
+			method: "POST",
+			body: JSON.stringify({ name }),
+		});
+	}
+	const items = getStore<T>(key, initial);
+	if (items.some((i) => i.name.toLowerCase() === name.toLowerCase())) {
+		throw new Error(`"${name}" already exists.`);
+	}
+	const created = { id: `n-${Date.now()}`, name } as T;
+	setStore(key, [...items, created]);
+	return created;
+}
+
+async function deleteNamed<T extends { id: string }>(
+	endpoint: string,
+	key: string,
+	initial: T[],
+	id: string,
+): Promise<void> {
+	if (!isMockMode()) {
+		await apiRequest<void>(`${endpoint}/${id}`, { method: "DELETE" });
+		return;
+	}
+	setStore(
+		key,
+		getStore<T>(key, initial).filter((i) => i.id !== id),
+	);
+}

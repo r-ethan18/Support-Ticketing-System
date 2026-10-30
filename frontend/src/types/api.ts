@@ -50,7 +50,8 @@ export interface Asset {
 	name: string;
 	departmentId: string;
 	categoryId: string;
-	location: string;
+	/** Only present in mock data; the backend's asset has no location. */
+	location?: string;
 }
 
 export interface Ticket {
