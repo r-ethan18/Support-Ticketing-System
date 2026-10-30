@@ -21,6 +21,8 @@ export default defineConfig(({ mode }) => {
 		server: {
 			port: 3000,
 			host: true,
+			// Served behind a proxy under whatever hostname it is given.
+			allowedHosts: true,
 			proxy: {
 				"/api": {
 					target: backendTarget,
@@ -31,6 +33,7 @@ export default defineConfig(({ mode }) => {
 		preview: {
 			port: 3000,
 			host: true,
+			allowedHosts: true,
 		},
 	};
 });
