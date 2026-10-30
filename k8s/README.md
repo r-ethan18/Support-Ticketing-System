@@ -77,9 +77,10 @@ Traefik handles all ingress. The routing rules defined in `k8s/base/ingress.yaml
 - **`/`** → `frontend:3000`
   All other requests go to the Node.js frontend server.
 
-Traefik uses longest-prefix matching, so `/api` takes priority over `/`.
-The annotation `traefik.ingress.kubernetes.io/router.priority: "10"` reinforces
-this on the backend rule.
+Traefik's default router priority is the rule length, so `/api` takes priority
+over `/`. Do not add `traefik.ingress.kubernetes.io/router.priority`: it applies
+to every path of the Ingress, so both routers tie and `/api` can end up at the
+frontend, which answers with a 502 from its Vite proxy.
 
 ---
 
