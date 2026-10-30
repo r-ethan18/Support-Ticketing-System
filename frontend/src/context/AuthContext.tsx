@@ -6,7 +6,10 @@ import {
 	useEffect,
 	useState,
 } from "react";
-import { SESSION_EXPIRED_EVENT } from "../services/apiClient";
+import {
+	SESSION_EXPIRED_EVENT,
+	SESSION_SYNC_EVENT,
+} from "../services/apiClient";
 import { authService } from "../services/authService";
 import {
 	isMockMode,
@@ -33,6 +36,11 @@ interface AuthContextType {
 	toggleMockMode: (enabled: boolean) => void;
 	resetDemoData: () => void;
 }
+
+/** How often to re-read the session while the app is open. */
+const SYNC_INTERVAL_MS = 60_000;
+/** Minimum gap between syncs, however they are triggered. */
+const SYNC_MIN_INTERVAL_MS = 5_000;
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -72,6 +80,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
 		return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
 	}, []);
+
+	const signedIn = Boolean(user) && !mockMode;
+	useEffect(() => {
+		if (!signedIn) return;
+		let lastSync = Date.now();
+		let syncing = false;
+		const sync = async () => {
+			// Skip if one is running or just finished (e.g. a burst of 403s).
+			if (syncing || Date.now() - lastSync < SYNC_MIN_INTERVAL_MS) return;
+			syncing = true;
+			try {
+				const fresh = await authService.syncSession();
+				if (fresh) {
+					setUser((current) =>
+						JSON.stringify(current) === JSON.stringify(fresh) ? current : fresh,
+					);
+				}
+			} finally {
+				lastSync = Date.now();
+				syncing = false;
+			}
+		};
+		const onVisible = () => {
+			if (document.visibilityState === "visible") void sync();
+		};
+		const timer = window.setInterval(sync, SYNC_INTERVAL_MS);
+		window.addEventListener(SESSION_SYNC_EVENT, sync);
+		document.addEventListener("visibilitychange", onVisible);
+		return () => {
+			window.clearInterval(timer);
+			window.removeEventListener(SESSION_SYNC_EVENT, sync);
+			document.removeEventListener("visibilitychange", onVisible);
+		};
+	}, [signedIn]);
 
 	const login = useCallback(async (email: string, pass: string) => {
 		const result = await authService.login(email, pass);
