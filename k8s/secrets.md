@@ -13,6 +13,8 @@ All workloads consume credentials through a single Kubernetes Secret named
 | `DB_NAME` | PostgreSQL database name | e.g. `sts` |
 | `DB_USER` | PostgreSQL user | e.g. `sts` |
 | `DB_PASSWORD` | PostgreSQL password | Use a strong random value |
+| `ADMIN_EMAIL` | Email of the first admin | **Required**; created on first start |
+| `ADMIN_PASSWORD` | Password of the first admin | **Required**, at least 12 characters |
 
 ---
 
@@ -26,6 +28,8 @@ never written to disk or committed to the repository.
 # Generate strong random values
 JWT_SECRET=$(openssl rand -hex 32)
 DB_PASSWORD=$(openssl rand -hex 20)
+ADMIN_EMAIL=admin@example.com            # change to the real admin address
+ADMIN_PASSWORD=$(openssl rand -hex 16)   # note it down: it is not shown again
 
 # Ensure the namespace exists
 kubectl create namespace sts-prod --dry-run=client -o yaml | kubectl apply -f -
@@ -36,7 +40,9 @@ kubectl create secret generic sts-secrets \
   --from-literal=JWT_SECRET="${JWT_SECRET}" \
   --from-literal=DB_NAME=sts \
   --from-literal=DB_USER=sts \
-  --from-literal=DB_PASSWORD="${DB_PASSWORD}"
+  --from-literal=DB_PASSWORD="${DB_PASSWORD}" \
+  --from-literal=ADMIN_EMAIL="${ADMIN_EMAIL}" \
+  --from-literal=ADMIN_PASSWORD="${ADMIN_PASSWORD}"
 ```
 
 To verify (keys only, not values):
@@ -64,6 +70,8 @@ kubectl create secret generic sts-secrets \
   --from-literal=DB_NAME=sts \
   --from-literal=DB_USER=sts \
   --from-literal=DB_PASSWORD="<existing-value>" \
+  --from-literal=ADMIN_EMAIL="<existing-value>" \
+  --from-literal=ADMIN_PASSWORD="<existing-value>" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # Restart the backend to pick up the new JWT_SECRET
