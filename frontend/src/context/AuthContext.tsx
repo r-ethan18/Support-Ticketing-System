@@ -6,6 +6,7 @@ import {
 	useEffect,
 	useState,
 } from "react";
+import { SESSION_EXPIRED_EVENT } from "../services/apiClient";
 import { authService } from "../services/authService";
 import {
 	isMockMode,
@@ -49,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			})
 			.catch(() => {
 				if (isMounted) {
+					setUser(null);
 					setLoading(false);
 				}
 			});
@@ -56,6 +58,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		return () => {
 			isMounted = false;
 		};
+	}, []);
+
+	useEffect(() => {
+		// A refresh token was rejected mid-session; drop to the login screen.
+		const onExpired = () => setUser(null);
+		window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+		return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
 	}, []);
 
 	const login = useCallback(async (email: string, pass: string) => {
@@ -82,7 +91,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			setUser(persona);
 		} else {
 			// When switching to live mode, verify current token or logout
-			authService.restoreSession().then((u) => setUser(u));
+			authService
+				.restoreSession()
+				.then((u) => setUser(u))
+				.catch(() => setUser(null));
 		}
 	}, []);
 

@@ -2,8 +2,11 @@ import type { Person, Role, TokenResponse } from "../types/api";
 import {
 	ApiError,
 	apiRequest,
+	getApiBaseUrl,
+	getStoredRefreshToken,
 	getStoredToken,
 	removeStoredToken,
+	setStoredRefreshToken,
 	setStoredToken,
 } from "./apiClient";
 import { INITIAL_PEOPLE } from "./mockData";
@@ -103,21 +106,15 @@ export const authService = {
 
 		try {
 			// Real API authentication against POST /api/v1/auth/token
-			const res = await apiRequest<
-				TokenResponse & { accessToken?: string; access_token?: string }
-			>("/auth/token", {
+			const res = await apiRequest<TokenResponse>("/auth/token", {
 				method: "POST",
 				body: JSON.stringify({ email, password }),
+				skipAuthRefresh: true,
 			});
 
-			const token = res.accessToken || res.access_token;
-			if (!token) {
-				throw new Error(
-					"Authentication response did not contain an access token.",
-				);
-			}
-
-			setStoredToken(token);
+			setStoredToken(res.accessToken);
+			setStoredRefreshToken(res.refreshToken);
+			const token = res.accessToken;
 
 			// Fetch real authenticated user profile from GET /api/v1/auth/me
 			const person = await apiRequest<Person>("/auth/me");
@@ -141,18 +138,18 @@ export const authService = {
 		}
 
 		try {
+			// apiRequest refreshes an expired access token before giving up.
 			const person = await apiRequest<Person>("/auth/me");
 			localStorage.setItem(USER_SESSION_KEY, JSON.stringify(person));
 			return person;
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 401) {
-				// Expired or invalid token
+				// Access and refresh tokens are both dead.
 				authService.logout();
-				return null;
 			}
-			// In case of temporary network glitch, fallback to cached user
-			const cached = localStorage.getItem(USER_SESSION_KEY);
-			return cached ? (JSON.parse(cached) as Person) : null;
+			// Otherwise (network error, 5xx) the session can't be verified, so don't
+			// treat it as signed in; the tokens stay, and a reload retries.
+			return null;
 		}
 	},
 
@@ -169,6 +166,15 @@ export const authService = {
 	},
 
 	logout(): void {
+		const refreshToken = getStoredRefreshToken();
+		if (refreshToken && !isMockMode()) {
+			// Best effort: revoke the session server-side; don't block sign-out.
+			fetch(`${getApiBaseUrl()}/api/v1/auth/logout`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ refreshToken }),
+			}).catch(() => {});
+		}
 		removeStoredToken();
 		localStorage.removeItem(USER_SESSION_KEY);
 	},

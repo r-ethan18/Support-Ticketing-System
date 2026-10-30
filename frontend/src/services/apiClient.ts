@@ -2,6 +2,8 @@
  * Centralized API client for communicating with /api/v1
  */
 
+import type { TokenResponse } from "../types/api";
+
 export class ApiError extends Error {
 	constructor(
 		public status: number,
@@ -38,6 +40,10 @@ export class ApiError extends Error {
 }
 
 const TOKEN_KEY = "sts_auth_token";
+const REFRESH_TOKEN_KEY = "sts_refresh_token";
+
+/** Fired when a session can no longer be refreshed and the user must log in. */
+export const SESSION_EXPIRED_EVENT = "sts:session-expired";
 
 export const getStoredToken = (): string | null => {
 	try {
@@ -55,15 +61,34 @@ export const setStoredToken = (token: string): void => {
 	}
 };
 
+export const getStoredRefreshToken = (): string | null => {
+	try {
+		return localStorage.getItem(REFRESH_TOKEN_KEY);
+	} catch {
+		return null;
+	}
+};
+
+export const setStoredRefreshToken = (token: string): void => {
+	try {
+		localStorage.setItem(REFRESH_TOKEN_KEY, token);
+	} catch {
+		// Ignore storage errors in private browsing
+	}
+};
+
 export const removeStoredToken = (): void => {
 	try {
 		localStorage.removeItem(TOKEN_KEY);
+		localStorage.removeItem(REFRESH_TOKEN_KEY);
 	} catch {
 		// Ignore storage errors
 	}
 };
 
 export interface RequestOptions extends RequestInit {
+	/** Don't try to refresh the access token if this request gets a 401. */
+	skipAuthRefresh?: boolean;
 	params?: Record<
 		string,
 		string | number | boolean | null | undefined | (string | number)[]
@@ -77,23 +102,61 @@ export const getApiBaseUrl = (): string => {
 	return envUrl.replace(/\/+$/, "");
 };
 
+const buildApiUrl = (endpoint: string): string => {
+	// Ensure clean path construction without duplicate /api or /api/v1 prefixes
+	const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+	return `${getApiBaseUrl()}${path.startsWith("/api/") ? path : `/api/v1${path}`}`;
+};
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+/**
+ * Trade the stored refresh token for a new token pair. Refresh tokens are
+ * single-use, so concurrent callers share one request. Resolves `false`
+ * without ending the session if the server couldn't be reached.
+ */
+export function refreshSession(): Promise<boolean> {
+	refreshInFlight ??= (async () => {
+		const refreshToken = getStoredRefreshToken();
+		if (!refreshToken) return false;
+		try {
+			const response = await fetch(buildApiUrl("/auth/refresh"), {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ refreshToken }),
+			});
+			if (response.ok) {
+				const pair = (await response.json()) as TokenResponse;
+				setStoredToken(pair.accessToken);
+				setStoredRefreshToken(pair.refreshToken);
+				return true;
+			}
+			if (response.status === 401) {
+				removeStoredToken();
+				window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+			}
+			return false;
+		} catch {
+			return false;
+		}
+	})().finally(() => {
+		refreshInFlight = null;
+	});
+	return refreshInFlight;
+}
+
 export async function apiRequest<T>(
 	endpoint: string,
 	options: RequestOptions = {},
 ): Promise<T> {
+	const { skipAuthRefresh, ...fetchOptions } = options;
 	const token = getStoredToken();
 
-	// Ensure clean path construction without duplicate /api or /api/v1 prefixes
-	let normalizedPath = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
-	if (!normalizedPath.startsWith("/api/")) {
-		normalizedPath = `/api/v1${normalizedPath}`;
-	}
+	let url = buildApiUrl(endpoint);
 
-	let url = `${getApiBaseUrl()}${normalizedPath}`;
-
-	if (options.params) {
+	if (fetchOptions.params) {
 		const searchParams = new URLSearchParams();
-		for (const [key, value] of Object.entries(options.params)) {
+		for (const [key, value] of Object.entries(fetchOptions.params)) {
 			if (value === undefined || value === null || value === "") continue;
 			if (Array.isArray(value)) {
 				for (const item of value) {
@@ -113,7 +176,7 @@ export async function apiRequest<T>(
 
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
-		...(options.headers as Record<string, string>),
+		...(fetchOptions.headers as Record<string, string>),
 	};
 
 	if (token) {
@@ -122,9 +185,21 @@ export async function apiRequest<T>(
 
 	try {
 		const response = await fetch(url, {
-			...options,
+			...fetchOptions,
 			headers,
 		});
+
+		if (
+			response.status === 401 &&
+			token &&
+			!skipAuthRefresh &&
+			(await refreshSession())
+		) {
+			return await apiRequest<T>(endpoint, {
+				...options,
+				skipAuthRefresh: true,
+			});
+		}
 
 		if (!response.ok) {
 			let detail = `Request failed with status ${response.status}`;
