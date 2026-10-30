@@ -45,6 +45,12 @@ const REFRESH_TOKEN_KEY = "sts_refresh_token";
 /** Fired when a session can no longer be refreshed and the user must log in. */
 export const SESSION_EXPIRED_EVENT = "sts:session-expired";
 
+/**
+ * Fired after a 403: the person's role may have changed since their access
+ * token was issued, so the session should be refreshed and re-read.
+ */
+export const SESSION_SYNC_EVENT = "sts:session-sync";
+
 export const getStoredToken = (): string | null => {
 	try {
 		return localStorage.getItem(TOKEN_KEY);
@@ -110,35 +116,48 @@ const buildApiUrl = (endpoint: string): string => {
 
 let refreshInFlight: Promise<boolean> | null = null;
 
+async function exchangeRefreshToken(startedWith: string): Promise<boolean> {
+	// Another tab may have rotated the token while we waited for the lock;
+	// reusing the old one would make the server revoke the whole session.
+	const refreshToken = getStoredRefreshToken();
+	if (!refreshToken) return false;
+	if (refreshToken !== startedWith) return true;
+	try {
+		const response = await fetch(buildApiUrl("/auth/refresh"), {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ refreshToken }),
+		});
+		if (response.ok) {
+			const pair = (await response.json()) as TokenResponse;
+			setStoredToken(pair.accessToken);
+			setStoredRefreshToken(pair.refreshToken);
+			return true;
+		}
+		if (response.status === 401) {
+			removeStoredToken();
+			window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+		}
+		return false;
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Trade the stored refresh token for a new token pair. Refresh tokens are
- * single-use, so concurrent callers share one request. Resolves `false`
- * without ending the session if the server couldn't be reached.
+ * single-use, so callers in this tab share one request and tabs take turns
+ * via a Web Lock. Resolves `false` without ending the session if the server
+ * couldn't be reached.
  */
 export function refreshSession(): Promise<boolean> {
 	refreshInFlight ??= (async () => {
-		const refreshToken = getStoredRefreshToken();
-		if (!refreshToken) return false;
-		try {
-			const response = await fetch(buildApiUrl("/auth/refresh"), {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ refreshToken }),
-			});
-			if (response.ok) {
-				const pair = (await response.json()) as TokenResponse;
-				setStoredToken(pair.accessToken);
-				setStoredRefreshToken(pair.refreshToken);
-				return true;
-			}
-			if (response.status === 401) {
-				removeStoredToken();
-				window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
-			}
-			return false;
-		} catch {
-			return false;
-		}
+		const startedWith = getStoredRefreshToken();
+		if (!startedWith) return false;
+		if (!navigator.locks) return exchangeRefreshToken(startedWith);
+		return navigator.locks.request("sts-refresh-token", () =>
+			exchangeRefreshToken(startedWith),
+		);
 	})().finally(() => {
 		refreshInFlight = null;
 	});
@@ -199,6 +218,10 @@ export async function apiRequest<T>(
 				...options,
 				skipAuthRefresh: true,
 			});
+		}
+
+		if (response.status === 403 && token && !skipAuthRefresh) {
+			window.dispatchEvent(new Event(SESSION_SYNC_EVENT));
 		}
 
 		if (!response.ok) {
