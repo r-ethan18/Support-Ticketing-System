@@ -384,10 +384,15 @@ export const ticketService = {
 		);
 		const now = new Date().toISOString();
 
-		for (const a of assignments) {
-			if (a.ticketId === ticketId && !a.unassignedAt) {
-				a.unassignedAt = now;
-			}
+		if (
+			assignments.some(
+				(a) =>
+					a.ticketId === ticketId &&
+					a.assigneeId === assigneeId &&
+					!a.unassignedAt,
+			)
+		) {
+			throw new Error("Assignee is already on this ticket");
 		}
 
 		const newAssignment: TicketAssignment = {
