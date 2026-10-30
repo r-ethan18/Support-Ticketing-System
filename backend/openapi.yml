@@ -394,6 +394,9 @@ paths:
       tags:
       - people
       summary: Get a person
+      description: Staff profiles are visible to everyone. A requester's profile is
+        visible to that requester, supervisors, admins, and an assignee currently
+        assigned to one of their tickets.
       operationId: get_person
       security:
       - AccessToken: []
