@@ -12,6 +12,7 @@ import { LoginPage } from "./pages/auth/LoginPage";
 import { CreateTicketPage } from "./pages/requester/CreateTicketPage";
 import { MyTicketsPage } from "./pages/requester/MyTicketsPage";
 import { RequesterDashboard } from "./pages/requester/RequesterDashboard";
+import { DirectoryPage } from "./pages/shared/DirectoryPage";
 import { NotFoundPage } from "./pages/shared/NotFoundPage";
 import { TicketDetailPage } from "./pages/shared/TicketDetailPage";
 import { SupervisorDashboard } from "./pages/supervisor/SupervisorDashboard";
@@ -158,6 +159,16 @@ function AppRoutes() {
 				}
 			/>
 			<Route
+				path="/supervisor/assets"
+				element={
+					<ProtectedRoute allowedRoles={["supervisor", "admin"]}>
+						<AppShell pageTitle="Department Assets">
+							<DirectoryPage />
+						</AppShell>
+					</ProtectedRoute>
+				}
+			/>
+			<Route
 				path="/supervisor/tickets/:id"
 				element={
 					<ProtectedRoute allowedRoles={["supervisor", "admin"]}>
@@ -185,6 +196,16 @@ function AppRoutes() {
 					<ProtectedRoute allowedRoles={["admin"]}>
 						<AppShell pageTitle="Personnel & Access Management">
 							<UserManagementPage />
+						</AppShell>
+					</ProtectedRoute>
+				}
+			/>
+			<Route
+				path="/admin/directory"
+				element={
+					<ProtectedRoute allowedRoles={["admin"]}>
+						<AppShell pageTitle="Directory">
+							<DirectoryPage />
 						</AppShell>
 					</ProtectedRoute>
 				}
