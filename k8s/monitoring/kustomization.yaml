@@ -1,0 +1,11 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The PodMonitor and NetworkPolicy select the backend pods, so they live in the
+# same namespace as the workloads.
+namespace: sts-prod
+
+resources:
+  - backend-podmonitor.yaml
+  - backend-networkpolicy.yaml

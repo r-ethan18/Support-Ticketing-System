@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from backend.accounts import ensure_admin
 from backend.config import get_settings
+from backend.metrics import serve_metrics
 from backend.pubsub import PubSubHub, get_hub_instance
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
@@ -36,7 +37,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await ensure_admin(pool)
         app.state.db_pool = pool
         app.state.pub_sub = get_hub_instance()
-        yield
+        with serve_metrics(pool):
+            yield
     finally:
         await pool.close()
 

@@ -35,6 +35,8 @@ class Settings:
     # Only used to create the first admin when none exists.
     admin_email: str = ""
     admin_password: str = ""
+    # Port for the Prometheus listener; 0 disables it.
+    metrics_port: int = 9100
     # Failed logins before a lockout, and how long counting/locking lasts.
     login_max_failures: int = 5
     login_window_seconds: int = 900
@@ -70,6 +72,7 @@ def get_settings() -> Settings:
         ),
         admin_email=os.environ.get("ADMIN_EMAIL", ""),
         admin_password=os.environ.get("ADMIN_PASSWORD", ""),
+        metrics_port=int(os.environ.get("METRICS_PORT", "9100")),
         login_max_failures=int(os.environ.get("LOGIN_MAX_FAILURES", "5")),
         login_window_seconds=int(os.environ.get("LOGIN_WINDOW_SECONDS", "900")),
         login_lockout_seconds=int(os.environ.get("LOGIN_LOCKOUT_SECONDS", "900")),

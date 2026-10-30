@@ -1,0 +1,32 @@
+---
+# Deploys the backend's PodMonitor and NetworkPolicy (k8s/monitoring) as their
+# own Application, so the main one still syncs on clusters without Prometheus.
+#
+# Prerequisites: kube-prometheus-stack (it provides the PodMonitor CRD) and the
+# main Application from application.yaml.
+#
+# Apply with:
+#   kubectl apply -f argocd/monitoring-application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: support-ticketing-system-monitoring
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/r-ethan18/Support-Ticketing-System.git
+    targetRevision: main
+    path: k8s/monitoring
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sts-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # Don't fail the dry run when the PodMonitor CRD is not installed yet.
+      - SkipDryRunOnMissingResource=true

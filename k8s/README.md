@@ -11,7 +11,17 @@ Support Ticketing System — production Kubernetes setup using Kustomize, Traefi
 > The backend and PostgreSQL can be deployed independently. The frontend
 > Deployment and Service are included in the manifests for when the app is added.
 
----
+## Monitoring
+
+The backend serves Prometheus metrics on a dedicated port (`METRICS_PORT`,
+default `9100`, `0` disables) separate from the API port, so the ingress never
+routes to them. `monitoring/` holds a `PodMonitor` for kube-prometheus-stack and
+a `NetworkPolicy` that only lets Prometheus reach that port. The backend
+Deployment must label its pods `app.kubernetes.io/name: sts-backend` and name
+the container port `metrics`. Metrics are held in process memory and scraped;
+nothing is written to Postgres.
+
+## Work remaining
 
 ## Table of Contents
 
