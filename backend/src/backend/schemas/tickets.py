@@ -66,15 +66,18 @@ class TicketAttachment(CamelModel):
         default=None, description="Null once the uploader's account is deleted"
     )
     kind: AttachmentKind
-    storage_url: str
+    storage_url: str = Field(
+        description=(
+            "Where to fetch the file. For uploads this is the API's `/content`"
+            " route (needs the Bearer token); older rows hold an external URL."
+        )
+    )
+    filename: str | None = Field(
+        default=None, description="Original file name; null for external links"
+    )
+    content_type: str | None = None
+    size_bytes: int | None = None
     uploaded_at: datetime
-
-
-class TicketAttachmentCreate(CamelModel):
-    # PLACEHOLDER: assumes the file is already in storage and the client
-    # registers its URL. Swap for multipart / presigned upload if preferred.
-    kind: AttachmentKind
-    storage_url: str = Field(min_length=1, max_length=2048)
 
 
 class TicketComment(CamelModel):

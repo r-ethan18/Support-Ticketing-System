@@ -61,17 +61,22 @@ async def demote_to_requester(
     )
 
 
-async def delete_person(conn: AsyncConnection, person_id: UUID, actor_id: UUID) -> None:
+async def delete_person(
+    conn: AsyncConnection, person_id: UUID, actor_id: UUID
+) -> list[str]:
     """Delete a person without destroying what others are involved in.
 
     They are taken off their tickets, and their tickets stay (as a "deleted
     user's") unless the ticket is closed and nobody else has anything in it.
     Comments, uploads, history and assignments are kept with the person blanked.
+
+    Returns the storage keys of files that went with the removed tickets, for
+    the caller to delete from object storage.
     """
     await release_assignments(conn, [person_id], actor_id)
-    await conn.execute(
+    cur = await conn.execute(
         """
-        DELETE FROM ticket t
+        SELECT t.id FROM ticket t
         WHERE t.requester_id = %(id)s AND t.status = 'closed'
           AND t.supervisor_id IS NULL
           AND NOT EXISTS (SELECT 1 FROM ticket_assignment a WHERE a.ticket_id = t.id)
@@ -84,7 +89,18 @@ async def delete_person(conn: AsyncConnection, person_id: UUID, actor_id: UUID) 
         """,
         {"id": person_id},
     )
+    doomed = [row[0] for row in await cur.fetchall()]
+    keys: list[str] = []
+    if doomed:
+        cur = await conn.execute(
+            "SELECT object_key FROM ticket_attachment"
+            " WHERE ticket_id = ANY(%s) AND object_key IS NOT NULL",
+            (doomed,),
+        )
+        keys = [row[0] for row in await cur.fetchall()]
+        await conn.execute("DELETE FROM ticket WHERE id = ANY(%s)", (doomed,))
     await conn.execute("DELETE FROM person WHERE id = %s", (person_id,))
+    return keys
 
 
 async def remove_vendor(conn: AsyncConnection, vendor_id: UUID, actor_id: UUID) -> bool:

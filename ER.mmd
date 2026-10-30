@@ -46,7 +46,11 @@ erDiagram
     uuid ticketID FK
     uuid uploadedByID FK
     enum kind "issue_evidence, completion_proof"
-    string storageUrl
+    string objectKey "key of the file in object storage (Garage); null for old external links"
+    string storageUrl "external link, only for rows without an objectKey"
+    string filename
+    string contentType
+    bigint sizeBytes
     timestamptz uploadedAt
   }
   PERSON_CREDENTIAL {

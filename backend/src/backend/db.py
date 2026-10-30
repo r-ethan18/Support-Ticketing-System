@@ -1,5 +1,6 @@
 """Postgres connection pool, owned by the app's lifespan."""
 
+import asyncio
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,6 +17,7 @@ from backend.accounts import ensure_admin
 from backend.config import get_settings
 from backend.metrics import serve_metrics
 from backend.pubsub import PubSubHub, get_hub_instance
+from backend.storage import S3ObjectStore
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -37,6 +39,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await ensure_admin(pool)
         app.state.db_pool = pool
         app.state.pub_sub = get_hub_instance()
+        storage = get_settings().storage
+        if storage.enabled:
+            store = S3ObjectStore(storage)
+            await asyncio.to_thread(store.ensure_bucket)
+            app.state.object_store = store
         with serve_metrics(pool):
             yield
     finally:

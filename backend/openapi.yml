@@ -2041,9 +2041,12 @@ paths:
     post:
       tags:
       - tickets
-      summary: Add an attachment to a ticket
-      description: '`issue_evidence` is added by the ticket''s requester, `completion_proof`
-        by an assignee currently assigned to it. Admins can add either. Closed tickets
+      summary: Upload an attachment to a ticket
+      description: 'Multipart upload of an image (PNG, JPEG, GIF, WebP) or PDF.
+
+
+        `issue_evidence` is added by the ticket''s requester, `completion_proof` by
+        an assignee currently assigned to it. Admins can add either. Closed tickets
         take no new attachments.'
       operationId: create_ticket_attachment
       security:
@@ -2059,9 +2062,9 @@ paths:
       requestBody:
         required: true
         content:
-          application/json:
+          multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TicketAttachmentCreate'
+              $ref: '#/components/schemas/Body_create_ticket_attachment'
       responses:
         '201':
           description: Successful Response
@@ -2089,6 +2092,81 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Resource already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: File is too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '415':
+          description: File type is not allowed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: File storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tickets/{ticket_id}/attachments/{attachment_id}/content:
+    get:
+      tags:
+      - tickets
+      summary: Download an attachment's file
+      description: Streams the uploaded file. Visible to anyone who can see the ticket.
+      operationId: get_ticket_attachment_content
+      security:
+      - AccessToken: []
+      parameters:
+      - name: ticket_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Ticket Id
+      - name: attachment_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Attachment Id
+      responses:
+        '200':
+          description: The file
+          content:
+            application/pdf: {}
+            image/gif: {}
+            image/jpeg: {}
+            image/png: {}
+            image/webp: {}
+        '401':
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: File storage is unavailable
           content:
             application/json:
               schema:
@@ -2406,6 +2484,19 @@ components:
       - issue_evidence
       - completion_proof
       title: AttachmentKind
+    Body_create_ticket_attachment:
+      properties:
+        kind:
+          $ref: '#/components/schemas/AttachmentKind'
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - kind
+      - file
+      title: Body_create_ticket_attachment
     Category:
       properties:
         id:
@@ -2793,6 +2884,24 @@ components:
         storageUrl:
           type: string
           title: Storageurl
+          description: Where to fetch the file. For uploads this is the API's `/content`
+            route (needs the Bearer token); older rows hold an external URL.
+        filename:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Filename
+          description: Original file name; null for external links
+        contentType:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Contenttype
+        sizeBytes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Sizebytes
         uploadedAt:
           type: string
           format: date-time
@@ -2805,20 +2914,6 @@ components:
       - storageUrl
       - uploadedAt
       title: TicketAttachment
-    TicketAttachmentCreate:
-      properties:
-        kind:
-          $ref: '#/components/schemas/AttachmentKind'
-        storageUrl:
-          type: string
-          maxLength: 2048
-          minLength: 1
-          title: Storageurl
-      type: object
-      required:
-      - kind
-      - storageUrl
-      title: TicketAttachmentCreate
     TicketComment:
       properties:
         id:

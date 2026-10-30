@@ -13,6 +13,7 @@ from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND
 from backend.routers.deps import PaginationDep
 from backend.schemas.enums import Role
 from backend.schemas.people import Person, PersonPage, RoleAssignment
+from backend.storage import OptionalObjectStoreDep, discard_objects
 from backend.ticket_access import TICKET_FROM, visibility
 
 router = APIRouter(prefix="/people", tags=["people"])
@@ -195,7 +196,12 @@ async def get_person(person_id: UUID, user: CurrentUserDep, pool: PoolDep) -> Pe
     dependencies=[Depends(require_roles(Role.admin))],
     responses={**NOT_FOUND, **FORBIDDEN},
 )
-async def delete_person(person_id: UUID, user: CurrentUserDep, pool: PoolDep) -> None:
+async def delete_person(
+    person_id: UUID,
+    user: CurrentUserDep,
+    pool: PoolDep,
+    store: OptionalObjectStoreDep,
+) -> None:
     person = await fetch_or_404(
         pool,
         Person,
@@ -208,4 +214,5 @@ async def delete_person(person_id: UUID, user: CurrentUserDep, pool: PoolDep) ->
             status.HTTP_403_FORBIDDEN, detail="Admin accounts cannot be deleted here"
         )
     async with pool.connection() as conn:
-        await delete_person_data(conn, person_id, user.id)
+        keys = await delete_person_data(conn, person_id, user.id)
+    await discard_objects(store, keys)

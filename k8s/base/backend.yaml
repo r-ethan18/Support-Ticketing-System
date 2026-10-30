@@ -52,6 +52,24 @@ spec:
                 secretKeyRef:
                   name: sts-secrets
                   key: DB_PASSWORD
+            # Attachments are stored in Garage (garage.yaml). The backend creates
+            # the bucket on startup.
+            - name: S3_ENDPOINT
+              value: garage:3900
+            - name: S3_REGION
+              value: garage
+            - name: S3_BUCKET
+              value: sts-attachments
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sts-secrets
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sts-secrets
+                  key: S3_SECRET_KEY
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:

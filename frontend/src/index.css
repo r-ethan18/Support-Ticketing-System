@@ -1743,6 +1743,26 @@ body {
 	object-fit: cover;
 }
 
+.attachment-placeholder {
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 8px;
+	font-size: 0.72rem;
+	color: var(--text-muted);
+	text-align: center;
+	word-break: break-all;
+}
+
+.attachment-filename {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .attachment-kind-badge {
 	position: absolute;
 	top: 8px;

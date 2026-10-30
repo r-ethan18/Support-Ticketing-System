@@ -14,6 +14,7 @@ from backend.main import create_app
 from backend.refresh_tokens import get_refresh_token_store
 from backend.schemas.enums import Role
 from backend.security import hash_password
+from backend.storage import get_object_store, get_optional_object_store
 from backend.throttle import get_throttle
 
 SECRET = "x" * 32
@@ -41,6 +42,29 @@ class InMemoryRefreshTokens:
 
     async def issue(self, person_id: UUID) -> str:
         return f"refresh-{person_id}"
+
+
+class InMemoryObjectStore:
+    """Stands in for Garage: objects live in a dict."""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, tuple[bytes, str]] = {}
+
+    async def put(self, key: str, data: bytes, content_type: str) -> None:
+        self.objects[key] = (data, content_type)
+
+    async def get(self, key: str) -> bytes | None:
+        found = self.objects.get(key)
+        return found[0] if found else None
+
+    async def delete(self, keys: list[str]) -> None:
+        for key in keys:
+            self.objects.pop(key, None)
+
+
+@pytest.fixture
+def object_store() -> InMemoryObjectStore:
+    return InMemoryObjectStore()
 
 
 @pytest.fixture(autouse=True)
@@ -168,8 +192,11 @@ def seed() -> Iterator[Seeder]:
 
 
 @pytest.fixture
-def db_client(seed: Seeder) -> Iterator[TestClient]:
-    with TestClient(create_app()) as c:
+def db_client(seed: Seeder, object_store: InMemoryObjectStore) -> Iterator[TestClient]:
+    app = create_app()
+    app.dependency_overrides[get_object_store] = lambda: object_store
+    app.dependency_overrides[get_optional_object_store] = lambda: object_store
+    with TestClient(app) as c:
         yield c
 
 

@@ -1,0 +1,134 @@
+---
+# StatefulSet: a single Garage pod (S3-compatible object storage) holding
+# ticket attachments; Postgres only keeps their keys. `--single-node` sets up
+# the cluster layout and `--default-bucket` creates the bucket and access key
+# from the GARAGE_DEFAULT_* variables, so there is no manual `garage layout` step.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: garage
+  labels:
+    app: garage
+spec:
+  serviceName: garage    # must match the Service name below
+  replicas: 1
+  selector:
+    matchLabels:
+      app: garage
+  template:
+    metadata:
+      labels:
+        app: garage
+    spec:
+      containers:
+        - name: garage
+          image: dxflrs/garage:v2.5.0
+          command: ["/garage", "server", "--single-node", "--default-bucket"]
+          ports:
+            - containerPort: 3900
+              name: s3
+          env:
+            - name: GARAGE_RPC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sts-secrets
+                  key: GARAGE_RPC_SECRET
+            - name: GARAGE_DEFAULT_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sts-secrets
+                  key: S3_ACCESS_KEY
+            - name: GARAGE_DEFAULT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sts-secrets
+                  key: S3_SECRET_KEY
+            # Must match S3_BUCKET on the backend.
+            - name: GARAGE_DEFAULT_BUCKET
+              value: sts-attachments
+          volumeMounts:
+            - name: garage-config
+              mountPath: /etc/garage.toml
+              subPath: garage.toml
+            - name: garage-meta
+              mountPath: /var/lib/garage/meta
+            - name: garage-data
+              mountPath: /var/lib/garage/data
+          readinessProbe:
+            tcpSocket:
+              port: 3900
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: 3900
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: garage-config
+          configMap:
+            name: garage-config   # generated from garage.toml (kustomization.yaml)
+  volumeClaimTemplates:
+    - metadata:
+        name: garage-meta
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+    - metadata:
+        name: garage-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
+---
+# ClusterIP Service named "garage" so the backend can reach the S3 API at
+# garage:3900 (S3_ENDPOINT). Not routed by the Ingress: files are only served
+# through the backend, which checks who may see the ticket. The RPC port (3901)
+# is deliberately left out.
+apiVersion: v1
+kind: Service
+metadata:
+  name: garage
+  labels:
+    app: garage
+spec:
+  type: ClusterIP
+  selector:
+    app: garage
+  ports:
+    - port: 3900
+      targetPort: 3900
+      name: s3
+---
+# Only the backend may talk to Garage.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: garage-allow-backend
+spec:
+  podSelector:
+    matchLabels:
+      app: garage
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: backend
+      ports:
+        - protocol: TCP
+          port: 3900

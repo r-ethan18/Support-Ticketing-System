@@ -13,7 +13,11 @@ import { Input } from "../../components/common/Input";
 import { Select } from "../../components/common/Select";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
-import { ticketService } from "../../services/ticketService";
+import {
+	ATTACHMENT_ACCEPT,
+	attachmentProblem,
+	ticketService,
+} from "../../services/ticketService";
 import type { TicketPriority } from "../../types/api";
 
 export function CreateTicketPage() {
@@ -25,7 +29,7 @@ export function CreateTicketPage() {
 	const [location, setLocation] = useState("");
 	const [priority, setPriority] = useState<TicketPriority>("medium");
 	const [description, setDescription] = useState("");
-	const [attachmentUrl, setAttachmentUrl] = useState("");
+	const [attachment, setAttachment] = useState<File | null>(null);
 
 	const [submitting, setSubmitting] = useState(false);
 	const [formError, setFormError] = useState<string | null>(null);
@@ -46,6 +50,11 @@ export function CreateTicketPage() {
 			setFormError("Please provide a description with at least 10 characters.");
 			return;
 		}
+		const fileProblem = attachment ? attachmentProblem(attachment) : null;
+		if (fileProblem) {
+			setFormError(fileProblem);
+			return;
+		}
 
 		try {
 			setSubmitting(true);
@@ -59,13 +68,25 @@ export function CreateTicketPage() {
 				user?.id || "p-req-1",
 			);
 
-			if (attachmentUrl.trim()) {
-				await ticketService.addAttachment(
-					created.id,
-					"issue_evidence",
-					attachmentUrl.trim(),
-					user?.id || "p-req-1",
-				);
+			if (attachment) {
+				try {
+					await ticketService.addAttachment(
+						created.id,
+						"issue_evidence",
+						attachment,
+						user?.id || "p-req-1",
+					);
+				} catch (err) {
+					// The ticket exists; don't make the user submit it twice.
+					showToast(
+						`Ticket created, but the file could not be attached: ${
+							err instanceof Error ? err.message : "upload failed"
+						}`,
+						"error",
+					);
+					navigate(`/requester/tickets/${created.id}`);
+					return;
+				}
 			}
 
 			showToast(
@@ -190,17 +211,15 @@ export function CreateTicketPage() {
 						</div>
 
 						<div className="col-span-2 form-group">
-							<label htmlFor="attachment-url" className="form-label">
-								Evidence / Photo URL (Optional)
-							</label>
 							<Input
-								id="attachment-url"
-								name="attachmentUrl"
-								placeholder="https://example.com/photo.png or paste image link"
-								value={attachmentUrl}
-								onChange={(e) => setAttachmentUrl(e.target.value)}
+								id="attachment-file"
+								name="attachment"
+								type="file"
+								label="Evidence / Photo (Optional)"
+								accept={ATTACHMENT_ACCEPT}
+								onChange={(e) => setAttachment(e.target.files?.[0] ?? null)}
 								leftIcon={<UploadCloud size={16} />}
-								helperText="Add a photo link of the broken hardware or error screenshot."
+								helperText="Add a photo of the broken hardware or an error screenshot (PNG, JPEG, GIF, WebP or PDF, up to 10 MB)."
 							/>
 						</div>
 					</div>

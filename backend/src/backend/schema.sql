@@ -97,6 +97,14 @@ CREATE TABLE IF NOT EXISTS ticket_attachment (
 
 CREATE INDEX IF NOT EXISTS ticket_attachment_ticket_idx ON ticket_attachment (ticket_id);
 
+-- Uploaded files live in object storage; these describe them. Rows without an
+-- object_key are older links to external images and keep using storage_url.
+ALTER TABLE ticket_attachment ADD COLUMN IF NOT EXISTS object_key text;
+ALTER TABLE ticket_attachment ADD COLUMN IF NOT EXISTS filename text;
+ALTER TABLE ticket_attachment ADD COLUMN IF NOT EXISTS content_type text;
+ALTER TABLE ticket_attachment ADD COLUMN IF NOT EXISTS size_bytes bigint;
+ALTER TABLE ticket_attachment ALTER COLUMN storage_url DROP NOT NULL;
+
 CREATE TABLE IF NOT EXISTS ticket_comment (
     id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     ticket_id  uuid NOT NULL REFERENCES ticket (id) ON DELETE CASCADE,

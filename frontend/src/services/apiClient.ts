@@ -95,6 +95,8 @@ export const removeStoredToken = (): void => {
 export interface RequestOptions extends RequestInit {
 	/** Don't try to refresh the access token if this request gets a 401. */
 	skipAuthRefresh?: boolean;
+	/** Resolve with the response body as a Blob instead of parsing JSON. */
+	as?: "blob";
 	params?: Record<
 		string,
 		string | number | boolean | null | undefined | (string | number)[]
@@ -168,7 +170,7 @@ export async function apiRequest<T>(
 	endpoint: string,
 	options: RequestOptions = {},
 ): Promise<T> {
-	const { skipAuthRefresh, ...fetchOptions } = options;
+	const { skipAuthRefresh, as, ...fetchOptions } = options;
 	const token = getStoredToken();
 
 	let url = buildApiUrl(endpoint);
@@ -193,8 +195,11 @@ export async function apiRequest<T>(
 		}
 	}
 
+	// For FormData the browser sets the multipart Content-Type (with boundary).
 	const headers: Record<string, string> = {
-		"Content-Type": "application/json",
+		...(fetchOptions.body instanceof FormData
+			? {}
+			: { "Content-Type": "application/json" }),
 		...(fetchOptions.headers as Record<string, string>),
 	};
 
@@ -253,6 +258,10 @@ export async function apiRequest<T>(
 
 		if (response.status === 204) {
 			return undefined as T;
+		}
+
+		if (as === "blob") {
+			return (await response.blob()) as T;
 		}
 
 		return (await response.json()) as T;
