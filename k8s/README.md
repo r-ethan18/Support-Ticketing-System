@@ -185,6 +185,8 @@ See [`k8s/secrets.md`](./secrets.md) for full details.
 ```bash
 JWT_SECRET=$(openssl rand -hex 32)
 DB_PASSWORD=$(openssl rand -hex 20)
+ADMIN_EMAIL=admin@example.com            # change to the real admin address
+ADMIN_PASSWORD=$(openssl rand -hex 16)   # note it down: it is not shown again
 
 kubectl create namespace sts-prod --dry-run=client -o yaml | kubectl apply -f -
 
@@ -193,10 +195,15 @@ kubectl create secret generic sts-secrets \
   --from-literal=JWT_SECRET="${JWT_SECRET}" \
   --from-literal=DB_NAME=sts \
   --from-literal=DB_USER=sts \
-  --from-literal=DB_PASSWORD="${DB_PASSWORD}"
+  --from-literal=DB_PASSWORD="${DB_PASSWORD}" \
+  --from-literal=ADMIN_EMAIL="${ADMIN_EMAIL}" \
+  --from-literal=ADMIN_PASSWORD="${ADMIN_PASSWORD}"
 ```
 
 > JWT_SECRET must be ≥ 32 characters — the backend will refuse to start otherwise.
+> ADMIN_EMAIL and ADMIN_PASSWORD (≥ 12 characters) are required too: on an empty
+> database the backend creates the first admin from them and refuses to start
+> without them.
 
 ---
 
@@ -354,8 +361,11 @@ GitHub natively skips workflow runs whose head commit message contains
 > use `localhost` if port-forwarding.
 
 ```bash
-# Backend: OpenAPI schema (no auth required)
-curl -f http://<CLUSTER_IP>/api/openapi.json | python3 -m json.tool | head -20
+# Backend reached through the /api rule: no token, so 401 (not 404/502)
+curl -o /dev/null -w "%{http_code}" http://<CLUSTER_IP>/api/v1/auth/me
+# Expected: 401
+# (FastAPI serves /openapi.json at the root, which the /api rule does not route;
+#  the pod probes check it directly on port 8000.)
 
 # Backend: auth token endpoint responds (400 without body is expected)
 curl -o /dev/null -w "%{http_code}" \
