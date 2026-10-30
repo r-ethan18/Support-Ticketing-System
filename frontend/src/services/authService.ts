@@ -129,6 +129,24 @@ export const authService = {
 		}
 	},
 
+	/**
+	 * Change the signed-in person's password. The server then revokes every
+	 * refresh token, this device's included, so sign in again with the new
+	 * password to keep this session going.
+	 */
+	async changePassword(
+		email: string,
+		currentPassword: string,
+		newPassword: string,
+	): Promise<void> {
+		if (isMockMode()) return;
+		await apiRequest<void>("/auth/password", {
+			method: "POST",
+			body: JSON.stringify({ currentPassword, newPassword }),
+		});
+		await authService.login(email, newPassword);
+	},
+
 	/** Create a requester account, then sign in with it. */
 	async register(details: {
 		name: string;
