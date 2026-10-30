@@ -1505,7 +1505,7 @@ paths:
           anyOf:
           - type: array
             items:
-              $ref: '#/components/schemas/TicketStatus'
+              $ref: '#/components/schemas/TicketStatusFilter'
           - type: 'null'
           title: Status
       - name: priority
@@ -2809,6 +2809,10 @@ components:
             format: uuid
           - type: 'null'
           title: Supervisorid
+        reopenRequested:
+          type: boolean
+          title: Reopenrequested
+          default: false
       type: object
       required:
       - id
@@ -3024,6 +3028,16 @@ components:
       - resolved
       - closed
       title: TicketStatus
+    TicketStatusFilter:
+      type: string
+      enum:
+      - open
+      - assigned
+      - in_progress
+      - resolved
+      - closed
+      - reopen_requested
+      title: TicketStatusFilter
     TicketStatusHistoryEntry:
       properties:
         id:

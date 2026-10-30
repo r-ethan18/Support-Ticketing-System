@@ -9,6 +9,7 @@ import {
 	MapPin,
 	MessageSquare,
 	Paperclip,
+	RotateCcw,
 	Send,
 	ShieldAlert,
 	UploadCloud,
@@ -18,6 +19,7 @@ import {
 	type FormEvent,
 	useCallback,
 	useEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -53,6 +55,39 @@ import type {
 	Vendor,
 } from "../../types/api";
 
+export interface ReopenRequest {
+	ticketId: string;
+	requesterId: string;
+	requesterName: string;
+	description: string;
+	requestedAt: string;
+}
+
+function getStoredReopenRequest(ticketId: string): ReopenRequest | null {
+	try {
+		const raw = localStorage.getItem(`sts_reopen_request_${ticketId}`);
+		return raw ? (JSON.parse(raw) as ReopenRequest) : null;
+	} catch {
+		return null;
+	}
+}
+
+function setStoredReopenRequest(ticketId: string, req: ReopenRequest): void {
+	try {
+		localStorage.setItem(`sts_reopen_request_${ticketId}`, JSON.stringify(req));
+	} catch {
+		// Ignore
+	}
+}
+
+function clearStoredReopenRequest(ticketId: string): void {
+	try {
+		localStorage.removeItem(`sts_reopen_request_${ticketId}`);
+	} catch {
+		// Ignore
+	}
+}
+
 export function TicketDetailPage() {
 	const { id } = useParams<{ id: string }>();
 	const { user, role } = useAuth();
@@ -61,6 +96,16 @@ export function TicketDetailPage() {
 
 	const [ticket, setTicket] = useState<Ticket | null>(null);
 	const [comments, setComments] = useState<TicketComment[]>([]);
+
+	const deduplicatedComments = useMemo(() => {
+		const seen = new Set<string>();
+		return comments.filter((c) => {
+			if (!c.id) return true;
+			if (seen.has(c.id)) return false;
+			seen.add(c.id);
+			return true;
+		});
+	}, [comments]);
 	const [assignments, setAssignments] = useState<TicketAssignment[]>([]);
 	const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
 	const [history, setHistory] = useState<TicketStatusHistoryEntry[]>([]);
@@ -99,11 +144,47 @@ export function TicketDetailPage() {
 
 	// Status update state
 	const [updatingStatus, setUpdatingStatus] = useState(false);
+
+	// Reopen Incident state & approval workflow
+	const [pendingReopen, setPendingReopen] = useState<ReopenRequest | null>(
+		null,
+	);
+	const [reopenModalOpen, setReopenModalOpen] = useState(false);
+	const [reopenDescription, setReopenDescription] = useState("");
+	const [reopenModalMode, setReopenModalMode] = useState<
+		"request" | "approve" | "direct"
+	>("request");
+	const [reopeningTicket, setReopeningTicket] = useState(false);
+	const [submittingReopenRequest, setSubmittingReopenRequest] = useState(false);
+
+	// Derive pending reopen request from comments (across devices/sessions) or local state
+	const pendingReopenFromComments = useMemo<ReopenRequest | null>(() => {
+		if (ticket?.status !== "closed") return null;
+		const reopenComments = comments.filter((c) =>
+			c.body.trim().startsWith("[Reopen"),
+		);
+		if (reopenComments.length === 0) return null;
+		const latest = reopenComments[reopenComments.length - 1];
+		if (latest.body.trim().startsWith("[Reopen Requested]:")) {
+			const desc = latest.body.replace("[Reopen Requested]:", "").trim();
+			const author = people.find((p) => p.id === latest.authorId);
+			return {
+				ticketId: ticket.id,
+				requesterId: latest.authorId || ticket.requesterId || "unknown",
+				requesterName: author?.name || "Requester",
+				description: desc,
+				requestedAt: latest.createdAt,
+			};
+		}
+		return null;
+	}, [ticket, comments, people]);
+
+	const effectivePendingReopen = pendingReopen || pendingReopenFromComments;
+
 	// Real-time SSE callbacks ---------------------------------------------------
 	const handleStreamComment = useCallback((newComment: TicketComment) => {
 		setComments((prev) => {
-			// Deduplicate: the local optimistic update already added this comment
-			// if the current user posted it, so skip duplicates by id.
+			// Deduplicate: avoid duplicate comment by id.
 			if (prev.some((c) => c.id === newComment.id)) return prev;
 			return [...prev, newComment];
 		});
@@ -242,6 +323,31 @@ export function TicketDetailPage() {
 
 	const triageAssetId = ticket?.assetId ?? null;
 	const canTriage = role === "supervisor" || role === "admin";
+
+	// Sync pending reopen request on ticket load/change
+	useEffect(() => {
+		if (!ticket) return;
+		if (ticket.status === "closed") {
+			setPendingReopen(getStoredReopenRequest(ticket.id));
+		} else {
+			clearStoredReopenRequest(ticket.id);
+			setPendingReopen(null);
+		}
+	}, [ticket]);
+
+	// Listen to storage events so reopen requests sync across tabs
+	useEffect(() => {
+		if (!ticket) return;
+		const ticketId = ticket.id;
+		const handleStorage = (e: StorageEvent) => {
+			if (e.key === `sts_reopen_request_${ticketId}`) {
+				setPendingReopen(getStoredReopenRequest(ticketId));
+			}
+		};
+		window.addEventListener("storage", handleStorage);
+		return () => window.removeEventListener("storage", handleStorage);
+	}, [ticket]);
+
 	useEffect(() => {
 		setAssetChoice(triageAssetId ?? "");
 		if (!triageAssetId || !canTriage) {
@@ -329,7 +435,10 @@ export function TicketDetailPage() {
 				commentBody.trim(),
 				user?.id || "p-req-1",
 			);
-			setComments((prev) => [...prev, newC]);
+			setComments((prev) => {
+				if (prev.some((c) => c.id === newC.id)) return prev;
+				return [...prev, newC];
+			});
 			setCommentBody("");
 			showToast("Comment posted to conversation", "success");
 		} catch (_err) {
@@ -364,6 +473,168 @@ export function TicketDetailPage() {
 			);
 		} finally {
 			setUpdatingStatus(false);
+		}
+	};
+
+	// Reopen Incident handlers --------------------------------------------------
+	const handleOpenRequesterReopenModal = () => {
+		setReopenModalMode("request");
+		setReopenDescription("");
+		setReopenModalOpen(true);
+	};
+
+	const handleOpenApproveModal = () => {
+		setReopenModalMode("approve");
+		setReopenDescription(effectivePendingReopen?.description || "");
+		setReopenModalOpen(true);
+	};
+
+	const handleOpenDirectReopenModal = () => {
+		setReopenModalMode("direct");
+		setReopenDescription("");
+		setReopenModalOpen(true);
+	};
+
+	const handleSubmitReopenRequest = async (e: FormEvent) => {
+		e.preventDefault();
+		if (!ticket || !reopenDescription.trim()) return;
+
+		try {
+			setSubmittingReopenRequest(true);
+			const reopenMsg = `[Reopen Requested]: ${reopenDescription.trim()}`;
+			const commentAuthorId = user?.id || ticket.requesterId || "p-req-1";
+
+			// Post directly to conversation (goes to convo!)
+			const newComment = await ticketService.createComment(
+				ticket.id,
+				reopenMsg,
+				commentAuthorId,
+			);
+			setComments((prev) =>
+				prev.some((c) => c.id === newComment.id) ? prev : [...prev, newComment],
+			);
+
+			const req: ReopenRequest = {
+				ticketId: ticket.id,
+				requesterId: user?.id || ticket.requesterId || "unknown",
+				requesterName: user?.name || requester?.name || "Requester",
+				description: reopenDescription.trim(),
+				requestedAt: new Date().toISOString(),
+			};
+			setStoredReopenRequest(ticket.id, req);
+			setPendingReopen(req);
+			setReopenModalOpen(false);
+			setActiveTab("conversation");
+			showToast(
+				"Reopen request with description posted to conversation",
+				"success",
+			);
+		} catch (err) {
+			showToast(
+				err instanceof Error ? err.message : "Failed to submit reopen request",
+				"error",
+			);
+		} finally {
+			setSubmittingReopenRequest(false);
+		}
+	};
+
+	const handleCancelReopenRequest = async () => {
+		if (!ticket) return;
+		try {
+			clearStoredReopenRequest(ticket.id);
+			setPendingReopen(null);
+			const cancelMsg = `[Reopen Request Cancelled by ${user?.name || requester?.name || "Requester"}]`;
+			const newComment = await ticketService.createComment(
+				ticket.id,
+				cancelMsg,
+				user?.id || ticket.requesterId || "p-req-1",
+			);
+			setComments((prev) =>
+				prev.some((c) => c.id === newComment.id) ? prev : [...prev, newComment],
+			);
+			showToast("Reopen request cancelled", "info");
+		} catch {
+			clearStoredReopenRequest(ticket.id);
+			setPendingReopen(null);
+			showToast("Reopen request cancelled", "info");
+		}
+	};
+
+	const handleDeclinePendingReopen = async () => {
+		if (!ticket) return;
+		try {
+			clearStoredReopenRequest(ticket.id);
+			setPendingReopen(null);
+			const declineMsg = `[Reopen Request Declined by ${user?.name || role}]`;
+			const newComment = await ticketService.createComment(
+				ticket.id,
+				declineMsg,
+				user?.id || "p-sup-1",
+			);
+			setComments((prev) =>
+				prev.some((c) => c.id === newComment.id) ? prev : [...prev, newComment],
+			);
+			showToast("Reopen request declined", "info");
+		} catch {
+			clearStoredReopenRequest(ticket.id);
+			setPendingReopen(null);
+			showToast("Reopen request declined", "info");
+		}
+	};
+
+	const handleConfirmReopen = async (e: FormEvent) => {
+		e.preventDefault();
+		if (!ticket || !reopenDescription.trim()) return;
+
+		try {
+			setReopeningTicket(true);
+			const updated = await ticketService.updateTicket(
+				ticket.id,
+				{ status: "open" },
+				user?.id || "p-sup-1",
+			);
+			setTicket(updated);
+			clearStoredReopenRequest(ticket.id);
+			setPendingReopen(null);
+			setReopenModalOpen(false);
+
+			const prefix =
+				reopenModalMode === "approve"
+					? `[Reopen Approved by ${user?.name || role}]`
+					: `[Incident Reopened by ${user?.name || role}]`;
+			const commentText = `${prefix}: ${reopenDescription.trim()}`;
+
+			try {
+				const newComment = await ticketService.createComment(
+					ticket.id,
+					commentText,
+					user?.id || "p-sup-1",
+				);
+				setComments((prev) =>
+					prev.some((c) => c.id === newComment.id)
+						? prev
+						: [...prev, newComment],
+				);
+			} catch (cErr) {
+				console.warn("Could not post reopen comment:", cErr);
+			}
+
+			try {
+				const freshHistory = await ticketService.listStatusHistory(ticket.id);
+				setHistory(freshHistory);
+			} catch {
+				// ignore
+			}
+
+			showToast("Incident reopened successfully", "success");
+		} catch (err) {
+			showToast(
+				err instanceof Error ? err.message : "Failed to reopen ticket",
+				"error",
+			);
+		} finally {
+			setReopeningTicket(false);
 		}
 	};
 
@@ -518,7 +789,13 @@ export function TicketDetailPage() {
 				<div className="ticket-header-top">
 					<div className="ticket-id-badge-wrap">
 						<span className="ticket-large-id">#{ticket.id}</span>
-						<StatusBadge status={ticket.status} size="md" />
+						<StatusBadge
+							status={ticket.status}
+							reopenRequested={Boolean(
+								effectivePendingReopen || ticket.reopenRequested,
+							)}
+							size="md"
+						/>
 						<PriorityBadge priority={ticket.priority} size="md" />
 					</div>
 					<div className="ticket-header-timestamps">
@@ -570,7 +847,7 @@ export function TicketDetailPage() {
 								onClick={() => setActiveTab("conversation")}
 							>
 								<MessageSquare size={16} />
-								<span>Conversation ({comments.length})</span>
+								<span>Conversation ({deduplicatedComments.length})</span>
 								{isLive && (
 									<span
 										className="sse-live-badge"
@@ -603,14 +880,14 @@ export function TicketDetailPage() {
 						{activeTab === "conversation" && (
 							<div className="tab-body">
 								<div className="comments-stream">
-									{comments.length === 0 ? (
+									{deduplicatedComments.length === 0 ? (
 										<EmptyState
 											icon={<MessageSquare size={28} />}
 											title="No comments yet"
 											description="Start the conversation between requester, field technician, and supervisor."
 										/>
 									) : (
-										comments.map((comment) => {
+										deduplicatedComments.map((comment) => {
 											const author = people.find(
 												(p) => p.id === comment.authorId,
 											);
@@ -648,7 +925,38 @@ export function TicketDetailPage() {
 																)}
 															</span>
 														</div>
-														<p className="comment-body">{comment.body}</p>
+														{comment.body.startsWith("[Reopen Requested]:") ? (
+															<div className="reopen-comment-badge-wrap">
+																<span className="reopen-comment-tag text-amber">
+																	<RotateCcw size={12} />
+																	<span>Reopening Requested</span>
+																</span>
+																<p className="comment-body">
+																	{comment.body
+																		.replace("[Reopen Requested]:", "")
+																		.trim()}
+																</p>
+															</div>
+														) : comment.body.startsWith("[Reopen Approved") ||
+															comment.body.startsWith("[Incident Reopened") ? (
+															<div className="reopen-comment-badge-wrap">
+																<span className="reopen-comment-tag text-emerald">
+																	<CheckCircle size={12} />
+																	<span>Incident Reopened</span>
+																</span>
+																<p className="comment-body">{comment.body}</p>
+															</div>
+														) : comment.body.startsWith("[Reopen Request") ? (
+															<div className="reopen-comment-badge-wrap">
+																<span className="reopen-comment-tag text-muted">
+																	<RotateCcw size={12} />
+																	<span>Reopen Update</span>
+																</span>
+																<p className="comment-body">{comment.body}</p>
+															</div>
+														) : (
+															<p className="comment-body">{comment.body}</p>
+														)}
 													</div>
 												</div>
 											);
@@ -824,76 +1132,169 @@ export function TicketDetailPage() {
 											Close Ticket (Issue Resolved)
 										</Button>
 									)}
-									{ticket.status === "closed" && (
-										<Button
-											variant="primary"
-											className="w-full"
-											isLoading={updatingStatus}
-											onClick={() => handleUpdateStatus("open")}
-										>
-											Reopen Incident
-										</Button>
-									)}
+									{ticket.status === "closed" &&
+										(effectivePendingReopen ? (
+											<div className="reopen-request-card">
+												<div className="reopen-card-header text-amber">
+													<Clock size={16} />
+													<span>Reopening Requested</span>
+												</div>
+												<p className="reopen-card-body">
+													Awaiting review and approval from a supervisor or
+													administrator.
+												</p>
+												<div className="reopen-quote-box">
+													"{effectivePendingReopen.description}"
+												</div>
+												<Button
+													variant="outline"
+													size="sm"
+													className="w-full text-secondary"
+													onClick={handleCancelReopenRequest}
+												>
+													Cancel Reopen Request
+												</Button>
+											</div>
+										) : (
+											<Button
+												variant="primary"
+												className="w-full"
+												icon={<RotateCcw size={16} />}
+												onClick={handleOpenRequesterReopenModal}
+											>
+												Reopen Incident
+											</Button>
+										))}
 								</>
 							)}
 
 							{/* Assignee Actions */}
 							{role === "assignee" && (
 								<div className="flex flex-col gap-2">
-									<Button
-										variant="primary"
-										className="w-full bg-emerald"
-										onClick={() => {
-											setAttachKind("completion_proof");
-											setAttachModalOpen(true);
-										}}
-									>
-										Upload Completion Proof
-									</Button>
-									<Button
-										variant="secondary"
-										className="w-full"
-										onClick={() => {
-											setActiveTab("conversation");
-											const commentInput = document.getElementById(
-												"ticket-reply-textarea",
-											);
-											if (commentInput) commentInput.focus();
-										}}
-									>
-										Post Progress Update
-									</Button>
-									<p className="text-xs text-secondary text-center mt-1">
-										Assignees submit completion proof and chat updates for
-										supervisor sign-off.
-									</p>
+									{ticket.status === "closed" ? (
+										<div className="unassigned-notice">
+											<CheckCircle size={16} className="text-emerald" />
+											<span className="text-sm text-secondary">
+												This incident has been resolved and closed.
+											</span>
+										</div>
+									) : (
+										<>
+											<Button
+												variant="primary"
+												className="w-full bg-emerald"
+												onClick={() => {
+													setAttachKind("completion_proof");
+													setAttachModalOpen(true);
+												}}
+											>
+												Upload Completion Proof
+											</Button>
+											<Button
+												variant="secondary"
+												className="w-full"
+												onClick={() => {
+													setActiveTab("conversation");
+													const commentInput = document.getElementById(
+														"ticket-reply-textarea",
+													);
+													if (commentInput) commentInput.focus();
+												}}
+											>
+												Post Progress Update
+											</Button>
+											<p className="text-xs text-secondary text-center mt-1">
+												Assignees submit completion proof and chat updates for
+												supervisor sign-off.
+											</p>
+										</>
+									)}
 								</div>
 							)}
 
 							{/* Supervisor & Admin Actions */}
 							{(role === "supervisor" || role === "admin") && (
-								<div className="flex flex-col gap-2">
-									<label
-										htmlFor="change-status-select"
-										className="text-xs font-semibold text-muted"
-									>
-										OVERRIDE STATUS
-									</label>
-									<Select
-										id="change-status-select"
-										value={ticket.status}
-										onChange={(e) =>
-											handleUpdateStatus(e.target.value as TicketStatus)
-										}
-										disabled={updatingStatus}
-										className="select-sm"
-									>
-										<option value="open">Open</option>
-										<option value="assigned">Assigned</option>
-										<option value="in_progress">In Progress</option>
-										<option value="resolved">Resolved</option>
-										<option value="closed">Closed</option>
-									</Select>
+								<div className="flex flex-col gap-3">
+									{ticket.status === "closed" &&
+										(effectivePendingReopen ? (
+											<div className="reopen-request-card supervisor-view">
+												<div className="reopen-card-header text-primary">
+													<AlertTriangle size={16} className="text-amber" />
+													<span>Reopen Request Pending</span>
+												</div>
+												<p className="reopen-card-body">
+													Submitted by{" "}
+													<strong>
+														{effectivePendingReopen.requesterName}
+													</strong>{" "}
+													on{" "}
+													{new Date(
+														effectivePendingReopen.requestedAt,
+													).toLocaleDateString()}
+													:
+												</p>
+												<div className="reopen-quote-box">
+													"{effectivePendingReopen.description}"
+												</div>
+												<div className="reopen-actions-row">
+													<Button
+														variant="primary"
+														size="sm"
+														className="w-full bg-emerald"
+														icon={<RotateCcw size={14} />}
+														onClick={handleOpenApproveModal}
+													>
+														Approve & Reopen Incident
+													</Button>
+													<Button
+														variant="outline"
+														size="sm"
+														className="w-full text-danger"
+														onClick={handleDeclinePendingReopen}
+													>
+														Decline Request
+													</Button>
+												</div>
+											</div>
+										) : (
+											<Button
+												variant="primary"
+												className="w-full"
+												icon={<RotateCcw size={16} />}
+												onClick={handleOpenDirectReopenModal}
+											>
+												Reopen Incident
+											</Button>
+										))}
+
+									<div className="flex flex-col gap-1">
+										<label
+											htmlFor="change-status-select"
+											className="text-xs font-semibold text-muted"
+										>
+											OVERRIDE STATUS
+										</label>
+										<Select
+											id="change-status-select"
+											value={ticket.status}
+											onChange={(e) => {
+												const next = e.target.value as TicketStatus;
+												if (ticket.status === "closed" && next === "open") {
+													handleOpenDirectReopenModal();
+													return;
+												}
+												handleUpdateStatus(next);
+											}}
+											disabled={updatingStatus || reopeningTicket}
+											className="select-sm"
+										>
+											<option value="open">Open</option>
+											<option value="assigned">Assigned</option>
+											<option value="in_progress">In Progress</option>
+											<option value="resolved">Resolved</option>
+											<option value="closed">Closed</option>
+										</Select>
+									</div>
 								</div>
 							)}
 						</div>
@@ -1171,6 +1572,93 @@ export function TicketDetailPage() {
 						leftIcon={<UploadCloud size={16} />}
 						helperText="PNG, JPEG, GIF, WebP or PDF, up to 10 MB"
 					/>
+				</form>
+			</Modal>
+
+			{/* Reopen Incident Modal */}
+			<Modal
+				isOpen={reopenModalOpen}
+				onClose={() => setReopenModalOpen(false)}
+				title={
+					reopenModalMode === "request"
+						? "Request Incident Reopening"
+						: reopenModalMode === "approve"
+							? "Approve Incident Reopening"
+							: "Reopen Incident"
+				}
+				description={
+					reopenModalMode === "request"
+						? "Please provide a description explaining why this incident needs to be reopened. A supervisor or administrator will review your explanation before the ticket is reopened."
+						: reopenModalMode === "approve"
+							? `Review and approve the reopening of ticket #${ticket.id}. You can amend or append to the explanation below.`
+							: `Provide a description/reason for reopening ticket #${ticket.id}. This will be recorded in the audit trail.`
+				}
+				footer={
+					<div className="flex gap-2 justify-end w-full">
+						<Button
+							variant="secondary"
+							onClick={() => setReopenModalOpen(false)}
+							disabled={reopeningTicket}
+						>
+							Cancel
+						</Button>
+						{reopenModalMode === "request" ? (
+							<Button
+								variant="primary"
+								onClick={handleSubmitReopenRequest}
+								isLoading={submittingReopenRequest}
+								disabled={!reopenDescription.trim() || submittingReopenRequest}
+							>
+								Reopen Incident
+							</Button>
+						) : (
+							<Button
+								variant="primary"
+								className="bg-emerald"
+								isLoading={reopeningTicket}
+								onClick={handleConfirmReopen}
+								disabled={!reopenDescription.trim()}
+							>
+								{reopenModalMode === "approve"
+									? "Approve & Reopen Ticket"
+									: "Confirm & Reopen Ticket"}
+							</Button>
+						)}
+					</div>
+				}
+			>
+				<form
+					onSubmit={
+						reopenModalMode === "request"
+							? handleSubmitReopenRequest
+							: handleConfirmReopen
+					}
+					className="flex flex-col gap-3"
+				>
+					<label
+						htmlFor="reopen-description-input"
+						className="text-xs font-semibold text-secondary"
+					>
+						Description / Reason for Reopening *
+					</label>
+					<textarea
+						id="reopen-description-input"
+						rows={4}
+						className="form-textarea w-full"
+						placeholder={
+							reopenModalMode === "request"
+								? "Describe why this issue needs to be reopened (e.g. problem resurfaced, incomplete repair, additional equipment fault)..."
+								: "Enter reason for reopening this ticket..."
+						}
+						value={reopenDescription}
+						onChange={(e) => setReopenDescription(e.target.value)}
+						required
+					/>
+					<p className="text-xs text-muted">
+						{reopenModalMode === "request"
+							? "Supervisors and administrators will be notified to review and approve your request."
+							: "This note will be posted to the ticket conversation and recorded in history."}
+					</p>
 				</form>
 			</Modal>
 		</div>

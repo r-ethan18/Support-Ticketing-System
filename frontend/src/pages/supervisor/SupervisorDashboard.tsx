@@ -198,7 +198,11 @@ export function SupervisorDashboard() {
 												<PriorityBadge priority={t.priority} size="sm" />
 											</td>
 											<td>
-												<StatusBadge status={t.status} size="sm" />
+												<StatusBadge
+													status={t.status}
+													reopenRequested={t.reopenRequested}
+													size="sm"
+												/>
 											</td>
 											<td>
 												<Button

@@ -25,6 +25,15 @@ class TicketStatus(StrEnum):
     closed = "closed"
 
 
+class TicketStatusFilter(StrEnum):
+    open = "open"
+    assigned = "assigned"
+    in_progress = "in_progress"
+    resolved = "resolved"
+    closed = "closed"
+    reopen_requested = "reopen_requested"
+
+
 class AttachmentKind(StrEnum):
     issue_evidence = "issue_evidence"
     completion_proof = "completion_proof"

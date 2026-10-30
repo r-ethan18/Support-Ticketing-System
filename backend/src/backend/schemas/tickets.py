@@ -22,6 +22,7 @@ class Ticket(CamelModel):
     # Unknown to the requester; filled in later by a supervisor.
     asset_id: UUID | None = None
     supervisor_id: UUID | None = None
+    reopen_requested: bool = False
 
 
 class TicketCreate(CamelModel):

@@ -220,7 +220,11 @@ export function RequesterDashboard() {
 											<PriorityBadge priority={ticket.priority} size="sm" />
 										</td>
 										<td>
-											<StatusBadge status={ticket.status} size="sm" />
+											<StatusBadge
+												status={ticket.status}
+												reopenRequested={ticket.reopenRequested}
+												size="sm"
+											/>
 										</td>
 										<td className="text-secondary text-sm">
 											{new Date(ticket.createdAt).toLocaleDateString(

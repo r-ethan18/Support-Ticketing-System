@@ -15,7 +15,7 @@ import type {
 	Person,
 	Ticket,
 	TicketPriority,
-	TicketStatus,
+	TicketStatusFilter,
 } from "../../types/api";
 
 export function SupervisorQueuePage() {
@@ -46,7 +46,9 @@ export function SupervisorQueuePage() {
 			const [ticketRes, people] = await Promise.all([
 				ticketService.listTickets({
 					status:
-						statusFilter === "all" ? undefined : [statusFilter as TicketStatus],
+						statusFilter === "all"
+							? undefined
+							: [statusFilter as TicketStatusFilter],
 					priority:
 						priorityFilter === "all"
 							? undefined
@@ -138,6 +140,7 @@ export function SupervisorQueuePage() {
 							<option value="in_progress">In Progress</option>
 							<option value="resolved">Resolved</option>
 							<option value="closed">Closed</option>
+							<option value="reopen_requested">Reopen Requested</option>
 						</Select>
 					</div>
 
@@ -217,7 +220,11 @@ export function SupervisorQueuePage() {
 											<PriorityBadge priority={t.priority} size="sm" />
 										</td>
 										<td>
-											<StatusBadge status={t.status} size="sm" />
+											<StatusBadge
+												status={t.status}
+												reopenRequested={t.reopenRequested}
+												size="sm"
+											/>
 										</td>
 										<td className="text-secondary text-sm">
 											{new Date(t.createdAt).toLocaleDateString(undefined, {

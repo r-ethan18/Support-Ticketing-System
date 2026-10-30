@@ -15,7 +15,7 @@ import { Select } from "../../components/common/Select";
 import { TableSkeleton } from "../../components/common/Skeleton";
 import { useAuth } from "../../context/AuthContext";
 import { ticketService } from "../../services/ticketService";
-import type { Ticket, TicketStatus } from "../../types/api";
+import type { Ticket, TicketStatusFilter } from "../../types/api";
 
 export function AssignedTicketsPage() {
 	const { user } = useAuth();
@@ -31,7 +31,9 @@ export function AssignedTicketsPage() {
 			try {
 				setLoading(true);
 				const statusParam =
-					statusFilter === "all" ? undefined : [statusFilter as TicketStatus];
+					statusFilter === "all"
+						? undefined
+						: [statusFilter as TicketStatusFilter];
 				const res = await ticketService.listTickets({
 					callerRole: "assignee",
 					callerId: user?.id,
@@ -126,6 +128,8 @@ export function AssignedTicketsPage() {
 							<option value="assigned">Assigned (Not Started)</option>
 							<option value="in_progress">In Progress</option>
 							<option value="resolved">Resolved</option>
+							<option value="closed">Closed</option>
+							<option value="reopen_requested">Reopen Requested</option>
 						</Select>
 					</div>
 				</div>
@@ -179,7 +183,11 @@ export function AssignedTicketsPage() {
 												<PriorityBadge priority={t.priority} size="sm" />
 											</td>
 											<td>
-												<StatusBadge status={t.status} size="sm" />
+												<StatusBadge
+													status={t.status}
+													reopenRequested={t.reopenRequested}
+													size="sm"
+												/>
 											</td>
 											<td className="text-secondary text-sm">
 												<span className="flex items-center gap-1">

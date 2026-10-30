@@ -25,6 +25,7 @@ from backend.schemas.enums import (
     TicketPriority,
     TicketSortField,
     TicketStatus,
+    TicketStatusFilter,
 )
 from backend.schemas.tickets import (
     Ticket,
@@ -40,6 +41,7 @@ from backend.schemas.tickets import (
 )
 from backend.storage import ObjectStoreDep, OptionalObjectStoreDep, discard_objects
 from backend.ticket_access import (
+    REOPEN_REQUESTED_SQL,
     TICKET_COLUMNS,
     TICKET_FROM,
     get_visible_ticket,
@@ -56,7 +58,7 @@ async def list_tickets(
     page: PaginationDep,
     user: CurrentUserDep,
     pool: PoolDep,
-    status: Annotated[list[TicketStatus] | None, Query()] = None,
+    status: Annotated[list[TicketStatusFilter] | None, Query()] = None,
     priority: Annotated[list[TicketPriority] | None, Query()] = None,
     requester_id: Annotated[UUID | None, Query(alias="requesterId")] = None,
     assignee_id: Annotated[
@@ -90,8 +92,23 @@ async def list_tickets(
         where.append(condition)
         params += extra
     if status:
-        where.append("t.status = ANY(%s)")
-        params.append([v.value for v in status])
+        has_reopen_req = any(
+            s == "reopen_requested" or s == TicketStatusFilter.reopen_requested
+            for s in status
+        )
+        regular_statuses = [
+            s.value if hasattr(s, "value") else str(s)
+            for s in status
+            if s != "reopen_requested" and s != TicketStatusFilter.reopen_requested
+        ]
+        conds = []
+        if regular_statuses:
+            conds.append("t.status = ANY(%s)")
+            params.append(regular_statuses)
+        if has_reopen_req:
+            conds.append(REOPEN_REQUESTED_SQL)
+        if conds:
+            where.append(f"({' OR '.join(conds)})")
     if priority:
         where.append("t.priority = ANY(%s)")
         params.append([v.value for v in priority])
@@ -161,7 +178,7 @@ async def create_ticket(
                 "INSERT INTO ticket (title, description, location, priority, status,"
                 " requester_id) VALUES (%s, %s, %s, %s, 'open', %s)"
                 " RETURNING id, title, description, location, priority, status,"
-                " created_at, closed_at, requester_id, asset_id, supervisor_id",
+                " created_at, closed_at, requester_id, asset_id, supervisor_id, FALSE AS reopen_requested",
                 (
                     body.title,
                     body.description,
@@ -223,7 +240,15 @@ async def update_ticket(
             )
         if status_change:
             changes["status"] = status_change
-    if ticket.status is TicketStatus.closed:
+    if ticket.status is TicketStatus.closed and (
+        user.role not in (Role.supervisor, Role.admin)
+        or changes.get("status")
+        not in (
+            TicketStatus.open,
+            TicketStatus.assigned,
+            TicketStatus.in_progress,
+        )
+    ):
         raise HTTPException(http.HTTP_409_CONFLICT, detail="Ticket is closed")
     if (
         user.role is Role.requester
@@ -245,6 +270,12 @@ async def update_ticket(
         assignments.append(value.value if hasattr(value, "value") else value)
     if new_status is TicketStatus.closed:
         sets.append("closed_at = now()")
+    elif (
+        ticket.status is TicketStatus.closed
+        and new_status
+        and new_status is not TicketStatus.closed
+    ):
+        sets.append("closed_at = NULL")
 
     try:
         async with pool.connection() as conn:
@@ -713,7 +744,9 @@ async def create_ticket_comment(
     hub: HubDep,
 ) -> TicketComment:
     ticket = await get_visible_ticket(pool, ticket_id, user)
-    if ticket.status is TicketStatus.closed:
+    if ticket.status is TicketStatus.closed and not body.body.strip().startswith(
+        "[Reopen"
+    ):
         raise HTTPException(http.HTTP_409_CONFLICT, detail="Ticket is closed")
     async with (
         pool.connection() as conn,

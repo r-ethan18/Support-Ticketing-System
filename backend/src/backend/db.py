@@ -94,7 +94,7 @@ async def fetch_page[T: BaseModel](
                 [*params, limit, offset],
             )
             items = await cur.fetchall()
-        from_part = select.split(" FROM ", 1)[1]
+        from_part = select.rsplit(" FROM ", 1)[1]
         cur = await conn.execute(f"SELECT count(*) FROM {from_part}{clause}", params)
         row = await cur.fetchone()
     return items, row[0] if row else 0

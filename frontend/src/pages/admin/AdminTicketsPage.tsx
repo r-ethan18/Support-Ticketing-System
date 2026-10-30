@@ -13,7 +13,7 @@ import type {
 	Person,
 	Ticket,
 	TicketPriority,
-	TicketStatus,
+	TicketStatusFilter,
 } from "../../types/api";
 
 export function AdminTicketsPage() {
@@ -37,7 +37,9 @@ export function AdminTicketsPage() {
 			try {
 				setLoading(true);
 				const statusParam =
-					statusFilter === "all" ? undefined : [statusFilter as TicketStatus];
+					statusFilter === "all"
+						? undefined
+						: [statusFilter as TicketStatusFilter];
 				const priorityParam =
 					priorityFilter === "all"
 						? undefined
@@ -163,6 +165,7 @@ export function AdminTicketsPage() {
 							<option value="in_progress">In Progress</option>
 							<option value="resolved">Resolved</option>
 							<option value="closed">Closed</option>
+							<option value="reopen_requested">Reopen Requested</option>
 						</Select>
 					</div>
 
@@ -255,7 +258,11 @@ export function AdminTicketsPage() {
 													<PriorityBadge priority={t.priority} size="sm" />
 												</td>
 												<td>
-													<StatusBadge status={t.status} size="sm" />
+													<StatusBadge
+														status={t.status}
+														reopenRequested={t.reopenRequested}
+														size="sm"
+													/>
 												</td>
 												<td className="text-secondary text-sm">
 													{new Date(t.createdAt).toLocaleDateString(undefined, {

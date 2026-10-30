@@ -9,7 +9,11 @@ import { Select } from "../../components/common/Select";
 import { TableSkeleton } from "../../components/common/Skeleton";
 import { useAuth } from "../../context/AuthContext";
 import { ticketService } from "../../services/ticketService";
-import type { Ticket, TicketPriority, TicketStatus } from "../../types/api";
+import type {
+	Ticket,
+	TicketPriority,
+	TicketStatusFilter,
+} from "../../types/api";
 
 export function MyTicketsPage() {
 	const { user } = useAuth();
@@ -33,7 +37,9 @@ export function MyTicketsPage() {
 			try {
 				setLoading(true);
 				const statusParam =
-					statusFilter === "all" ? undefined : [statusFilter as TicketStatus];
+					statusFilter === "all"
+						? undefined
+						: [statusFilter as TicketStatusFilter];
 				const priorityParam =
 					priorityFilter === "all"
 						? undefined
@@ -132,6 +138,7 @@ export function MyTicketsPage() {
 							<option value="in_progress">In Progress</option>
 							<option value="resolved">Resolved</option>
 							<option value="closed">Closed</option>
+							<option value="reopen_requested">Reopen Requested</option>
 						</Select>
 					</div>
 
@@ -232,7 +239,11 @@ export function MyTicketsPage() {
 												<PriorityBadge priority={t.priority} size="sm" />
 											</td>
 											<td>
-												<StatusBadge status={t.status} size="sm" />
+												<StatusBadge
+													status={t.status}
+													reopenRequested={t.reopenRequested}
+													size="sm"
+												/>
 											</td>
 											<td className="text-secondary text-sm">
 												{new Date(t.createdAt).toLocaleDateString(undefined, {

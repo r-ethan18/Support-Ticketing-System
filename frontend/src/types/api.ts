@@ -13,6 +13,8 @@ export type TicketStatus =
 	| "resolved"
 	| "closed";
 
+export type TicketStatusFilter = TicketStatus | "reopen_requested";
+
 export type AttachmentKind = "issue_evidence" | "completion_proof";
 
 export type SortOrder = "asc" | "desc";
@@ -66,6 +68,7 @@ export interface Ticket {
 	requesterId: string | null;
 	assetId?: string | null;
 	supervisorId?: string | null;
+	reopenRequested?: boolean;
 }
 
 export interface TicketAssignment {

@@ -153,3 +153,29 @@ def test_ticket_sse_stream_and_realtime_updates(
         assert status_event["data"]["status"] == "closed"
     finally:
         hub.unsubscribe(UUID(ticket), q)
+
+
+def test_requester_can_post_reopen_request_comment_on_closed_ticket(
+    db_client: TestClient, seed: Seeder
+) -> None:
+    _, owner = login_as(db_client, seed, Role.requester)
+    ticket = db_client.post(
+        API, json={"title": "t", "description": "d", "location": "l"}, headers=owner
+    ).json()["id"]
+    seed._created.append(("ticket", ticket))
+    url = f"{API}/{ticket}/comments"
+
+    # Close ticket
+    db_client.patch(f"{API}/{ticket}", json={"status": "closed"}, headers=owner)
+
+    # Ordinary comment fails with 409
+    assert (
+        db_client.post(url, json={"body": "regular chat"}, headers=owner).status_code
+        == 409
+    )
+
+    # Reopen request comment succeeds with 201
+    reopen_msg = "[Reopen Requested]: Issue recurring, please inspect again."
+    res = db_client.post(url, json={"body": reopen_msg}, headers=owner)
+    assert res.status_code == 201
+    assert res.json()["body"] == reopen_msg
