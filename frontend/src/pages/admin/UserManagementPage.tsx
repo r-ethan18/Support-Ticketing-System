@@ -1,4 +1,16 @@
-import { Mail, Phone, Search, Users } from "lucide-react";
+import {
+	AlertTriangle,
+	Eye,
+	EyeOff,
+	Lock,
+	Mail,
+	Phone,
+	Search,
+	ShieldCheck,
+	Trash2,
+	UserPlus,
+	Users,
+} from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Avatar } from "../../components/common/Avatar";
 import { RoleBadge } from "../../components/common/Badge";
@@ -19,23 +31,37 @@ export function UserManagementPage() {
 	const [vendors, setVendors] = useState<Vendor[]>([]);
 	const [loading, setLoading] = useState(true);
 
-	// Filters
+	// Filter state
 	const [searchQuery, setSearchQuery] = useState("");
 	const [roleFilter, setRoleFilter] = useState<string>("all");
 
-	// Role assignment modal
-	const [editing, setEditing] = useState<Person | null>(null);
+	// Add User Modal State
+	const [addUserModalOpen, setAddUserModalOpen] = useState(false);
+	const [newName, setNewName] = useState("");
+	const [newEmail, setNewEmail] = useState("");
+	const [newPhone, setNewPhone] = useState("");
+	const [newPassword, setNewPassword] = useState("");
+	const [showNewPassword, setShowNewPassword] = useState(false);
+	const [newRole, setNewRole] = useState<Role>("requester");
+	const [newDeptId, setNewDeptId] = useState("");
+	const [newVendorId, setNewVendorId] = useState("");
+	const [creatingUser, setCreatingUser] = useState(false);
+
+	// Manage User Modal State
+	const [managingPerson, setManagingPerson] = useState<Person | null>(null);
 	const [editRole, setEditRole] = useState<Exclude<Role, "admin">>("requester");
 	const [editDeptId, setEditDeptId] = useState("");
 	const [editVendorId, setEditVendorId] = useState("");
-	const [saving, setSaving] = useState(false);
+	const [savingRole, setSavingRole] = useState(false);
+	const [deletingUser, setDeletingUser] = useState(false);
+	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
 	useEffect(() => {
 		async function loadData() {
 			try {
 				setLoading(true);
 				const [loadedPeople, loadedDepts, loadedVendors] = await Promise.all([
-					ticketService.listPeople(),
+					ticketService.listPeople({ limit: 100 }),
 					ticketService.listDepartments(),
 					ticketService.listVendors(),
 				]);
@@ -44,24 +70,100 @@ export function UserManagementPage() {
 				setVendors(loadedVendors);
 			} catch (err) {
 				console.error("Failed to load user management data", err);
+				showToast("Failed to load personnel data from backend", "error");
 			} finally {
 				setLoading(false);
 			}
 		}
 
 		loadData();
-	}, []);
+	}, [showToast]);
 
-	const openRoleModal = (person: Person) => {
-		setEditing(person);
+	// Open Manage Modal
+	const openManageModal = (person: Person) => {
+		setManagingPerson(person);
 		setEditRole(person.role === "admin" ? "requester" : person.role);
 		setEditDeptId(person.departmentId ?? "");
 		setEditVendorId(person.vendorId ?? "");
+		setShowDeleteConfirm(false);
 	};
 
+	// Handle Create User
+	const handleCreateUser = async (e: FormEvent) => {
+		e.preventDefault();
+		if (!newName.trim() || !newEmail.trim()) {
+			showToast("Name and email are required", "error");
+			return;
+		}
+		if (newPassword.length < 12) {
+			showToast("Password must be at least 12 characters", "error");
+			return;
+		}
+		if (newRole === "supervisor" && !newDeptId) {
+			showToast("Department is required for supervisors", "error");
+			return;
+		}
+		if (newRole === "assignee" && !newVendorId) {
+			showToast("Vendor affiliation is required for assignees", "error");
+			return;
+		}
+
+		setCreatingUser(true);
+		try {
+			let created: Person;
+			if (newRole === "admin") {
+				created = await ticketService.createAdminUser({
+					name: newName.trim(),
+					email: newEmail.trim(),
+					phone: newPhone.trim() || "+1-555-0100",
+					password: newPassword,
+				});
+			} else {
+				// Register account with the specified password
+				created = await ticketService.registerPerson({
+					name: newName.trim(),
+					email: newEmail.trim(),
+					phone: newPhone.trim() || "+1-555-0100",
+					password: newPassword,
+				});
+
+				// If admin assigned a role other than requester, assign it now
+				if (newRole !== "requester") {
+					created = await ticketService.assignRole(created.id, {
+						role: newRole,
+						departmentId: newRole === "supervisor" ? newDeptId : null,
+						vendorId: newRole === "assignee" ? newVendorId : null,
+					});
+				}
+			}
+
+			setPeople((prev) => [created, ...prev]);
+			showToast(
+				`Successfully created ${created.name} (${created.role.toUpperCase()})`,
+				"success",
+			);
+			setAddUserModalOpen(false);
+			setNewName("");
+			setNewEmail("");
+			setNewPhone("");
+			setNewPassword("");
+			setNewRole("requester");
+			setNewDeptId("");
+			setNewVendorId("");
+		} catch (err) {
+			showToast(
+				err instanceof Error ? err.message : "Failed to create user",
+				"error",
+			);
+		} finally {
+			setCreatingUser(false);
+		}
+	};
+
+	// Handle Update Role
 	const handleAssignRole = async (e: FormEvent) => {
 		e.preventDefault();
-		if (!editing) return;
+		if (!managingPerson) return;
 		if (editRole === "supervisor" && !editDeptId) {
 			showToast("Choose a department for the supervisor.", "error");
 			return;
@@ -71,23 +173,47 @@ export function UserManagementPage() {
 			return;
 		}
 
-		setSaving(true);
+		setSavingRole(true);
 		try {
-			const updated = await ticketService.assignRole(editing.id, {
+			const updated = await ticketService.assignRole(managingPerson.id, {
 				role: editRole,
 				departmentId: editRole === "supervisor" ? editDeptId : null,
 				vendorId: editRole === "assignee" ? editVendorId : null,
 			});
 			setPeople((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-			showToast(`${updated.name} is now a ${updated.role}`, "success");
-			setEditing(null);
+			showToast(
+				`Updated ${updated.name}'s role to ${updated.role.toUpperCase()}`,
+				"success",
+			);
+			setManagingPerson(null);
 		} catch (err) {
 			showToast(
 				err instanceof Error ? err.message : "Failed to update role",
 				"error",
 			);
 		} finally {
-			setSaving(false);
+			setSavingRole(false);
+		}
+	};
+
+	// Handle Delete User
+	const handleDeleteUser = async () => {
+		if (!managingPerson) return;
+
+		setDeletingUser(true);
+		try {
+			await ticketService.deletePerson(managingPerson.id);
+			setPeople((prev) => prev.filter((p) => p.id !== managingPerson.id));
+			showToast(`Deactivated account for ${managingPerson.name}`, "success");
+			setManagingPerson(null);
+		} catch (err) {
+			showToast(
+				err instanceof Error ? err.message : "Failed to delete user",
+				"error",
+			);
+		} finally {
+			setDeletingUser(false);
+			setShowDeleteConfirm(false);
 		}
 	};
 
@@ -108,10 +234,17 @@ export function UserManagementPage() {
 				<div>
 					<h2 className="page-title">Personnel & Role Management</h2>
 					<p className="page-description">
-						People sign up themselves as requesters. Promote them to supervisors
-						or vendor assignees here.
+						Once users register, roles are unassigned by default. Promote
+						personnel to Supervisors or Vendor Technicians below.
 					</p>
 				</div>
+				<Button
+					variant="primary"
+					icon={<UserPlus size={16} />}
+					onClick={() => setAddUserModalOpen(true)}
+				>
+					Create User
+				</Button>
 			</div>
 
 			{/* Filters Toolbar */}
@@ -134,9 +267,9 @@ export function UserManagementPage() {
 							className="select-sm"
 						>
 							<option value="all">All Roles</option>
-							<option value="requester">Requesters</option>
+							<option value="requester">Requesters (Standard Employees)</option>
 							<option value="assignee">Assignees (Field Techs)</option>
-							<option value="supervisor">Supervisors</option>
+							<option value="supervisor">Supervisors (Department Leads)</option>
 							<option value="admin">Administrators</option>
 						</Select>
 					</div>
@@ -160,7 +293,7 @@ export function UserManagementPage() {
 								<tr>
 									<th>Person</th>
 									<th>Contact</th>
-									<th>Role</th>
+									<th>Assigned Role</th>
 									<th>Department / Vendor</th>
 									<th className="text-right">Action</th>
 								</tr>
@@ -182,7 +315,7 @@ export function UserManagementPage() {
 															{person.name}
 														</span>
 														<span className="user-id-code text-muted text-xs">
-															#{person.id}
+															#{person.id.slice(0, 8)}
 														</span>
 													</div>
 												</div>
@@ -209,18 +342,21 @@ export function UserManagementPage() {
 													? dept.name
 													: vendor
 														? `${vendor.name} (Contractor)`
-														: "Enterprise General"}
+														: "General Employee"}
 											</td>
 											<td className="text-right">
 												{person.role === "admin" ? (
-													<span className="text-muted text-xs">Fixed</span>
+													<span className="text-muted text-xs font-semibold">
+														System Admin
+													</span>
 												) : (
 													<Button
-														variant="ghost"
+														variant="secondary"
 														size="sm"
-														onClick={() => openRoleModal(person)}
+														icon={<ShieldCheck size={14} />}
+														onClick={() => openManageModal(person)}
 													>
-														Change Role
+														Manage
 													</Button>
 												)}
 											</td>
@@ -233,51 +369,102 @@ export function UserManagementPage() {
 				)}
 			</div>
 
-			{/* Role Assignment Modal */}
+			{/* Add User Modal */}
 			<Modal
-				isOpen={editing !== null}
-				onClose={() => setEditing(null)}
-				title="Change Role"
-				description={
-					editing
-						? `${editing.name} (${editing.email})`
-						: "Assign a role to an existing account."
-				}
+				isOpen={addUserModalOpen}
+				onClose={() => setAddUserModalOpen(false)}
+				title="Create System User"
+				description="Provision a new employee or staff account with credentials and access permissions."
 				footer={
 					<div className="flex gap-2 justify-end w-full">
-						<Button variant="secondary" onClick={() => setEditing(null)}>
+						<Button
+							variant="secondary"
+							onClick={() => setAddUserModalOpen(false)}
+						>
 							Cancel
 						</Button>
 						<Button
 							variant="primary"
-							isLoading={saving}
-							onClick={handleAssignRole}
+							isLoading={creatingUser}
+							onClick={handleCreateUser}
 						>
-							Save Role
+							Create User
 						</Button>
 					</div>
 				}
 			>
-				<form onSubmit={handleAssignRole} className="flex flex-col gap-4">
-					<Select
-						id="edit-role"
-						label="System Role"
-						value={editRole}
-						onChange={(e) =>
-							setEditRole(e.target.value as Exclude<Role, "admin">)
+				<form onSubmit={handleCreateUser} className="flex flex-col gap-4">
+					<Input
+						id="new-user-name"
+						label="Full Name"
+						placeholder="e.g. David Miller"
+						value={newName}
+						onChange={(e) => setNewName(e.target.value)}
+						required
+					/>
+
+					<Input
+						id="new-user-email"
+						label="Email Address"
+						type="email"
+						placeholder="d.miller@example.com"
+						value={newEmail}
+						onChange={(e) => setNewEmail(e.target.value)}
+						required
+					/>
+
+					<Input
+						id="new-user-phone"
+						label="Phone Number"
+						placeholder="+1 (555) 234-5678"
+						value={newPhone}
+						onChange={(e) => setNewPhone(e.target.value)}
+					/>
+
+					{/* Explicit Password Field as requested */}
+					<Input
+						id="new-user-password"
+						label="Account Password (min. 12 characters)"
+						type={showNewPassword ? "text" : "password"}
+						placeholder="Minimum 12 characters"
+						minLength={12}
+						value={newPassword}
+						onChange={(e) => setNewPassword(e.target.value)}
+						required
+						leftIcon={<Lock size={16} />}
+						rightElement={
+							<button
+								type="button"
+								className="password-toggle-btn"
+								onClick={() => setShowNewPassword(!showNewPassword)}
+								aria-label={showNewPassword ? "Hide password" : "Show password"}
+							>
+								{showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+							</button>
 						}
+					/>
+
+					<Select
+						id="new-user-role"
+						label="Assign System Role"
+						value={newRole}
+						onChange={(e) => setNewRole(e.target.value as Role)}
+						required
 					>
-						<option value="requester">Requester (Standard Employee)</option>
+						<option value="requester">
+							Requester (Standard Employee - Base Access)
+						</option>
 						<option value="assignee">Assignee (Vendor Technician)</option>
 						<option value="supervisor">Supervisor (Department Head)</option>
+						<option value="admin">Administrator (System Admin)</option>
 					</Select>
 
-					{editRole === "supervisor" && (
+					{newRole === "supervisor" && (
 						<Select
-							id="edit-dept"
-							label="Department"
-							value={editDeptId}
-							onChange={(e) => setEditDeptId(e.target.value)}
+							id="new-user-dept"
+							label="Assign Department"
+							value={newDeptId}
+							onChange={(e) => setNewDeptId(e.target.value)}
 							required
 						>
 							<option value="">-- Choose department --</option>
@@ -289,12 +476,12 @@ export function UserManagementPage() {
 						</Select>
 					)}
 
-					{editRole === "assignee" && (
+					{newRole === "assignee" && (
 						<Select
-							id="edit-vendor"
-							label="Employing Vendor"
-							value={editVendorId}
-							onChange={(e) => setEditVendorId(e.target.value)}
+							id="new-user-vendor"
+							label="Assign Employing Vendor"
+							value={newVendorId}
+							onChange={(e) => setNewVendorId(e.target.value)}
 							required
 						>
 							<option value="">-- Choose vendor --</option>
@@ -306,6 +493,139 @@ export function UserManagementPage() {
 						</Select>
 					)}
 				</form>
+			</Modal>
+
+			{/* Manage User Modal */}
+			<Modal
+				isOpen={managingPerson !== null}
+				onClose={() => setManagingPerson(null)}
+				title="Manage User & Assign Role"
+				description={
+					managingPerson
+						? `${managingPerson.name} (${managingPerson.email})`
+						: "Assign roles or manage permissions."
+				}
+				footer={
+					<div className="flex gap-2 justify-between w-full">
+						<div>
+							{!showDeleteConfirm ? (
+								<Button
+									variant="danger"
+									size="sm"
+									icon={<Trash2 size={14} />}
+									onClick={() => setShowDeleteConfirm(true)}
+								>
+									Deactivate
+								</Button>
+							) : (
+								<div className="flex items-center gap-2">
+									<Button
+										variant="danger"
+										size="sm"
+										isLoading={deletingUser}
+										onClick={handleDeleteUser}
+									>
+										Confirm Delete
+									</Button>
+									<Button
+										variant="ghost"
+										size="sm"
+										onClick={() => setShowDeleteConfirm(false)}
+									>
+										Cancel
+									</Button>
+								</div>
+							)}
+						</div>
+						<div className="flex gap-2">
+							<Button
+								variant="secondary"
+								onClick={() => setManagingPerson(null)}
+							>
+								Close
+							</Button>
+							<Button
+								variant="primary"
+								isLoading={savingRole}
+								onClick={handleAssignRole}
+							>
+								Save Role
+							</Button>
+						</div>
+					</div>
+				}
+			>
+				{managingPerson && (
+					<form onSubmit={handleAssignRole} className="flex flex-col gap-4">
+						{showDeleteConfirm && (
+							<div className="bg-danger-subtle border border-danger p-3 rounded text-sm text-danger flex items-start gap-2">
+								<AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />
+								<span>
+									Are you sure you want to delete this user? Their active
+									assignments will be released.
+								</span>
+							</div>
+						)}
+
+						<div className="p-3 bg-muted rounded-md flex flex-col gap-1 text-sm">
+							<span className="font-semibold text-slate">
+								User Account: {managingPerson.name}
+							</span>
+							<span className="text-secondary">{managingPerson.email}</span>
+							<span className="text-secondary text-xs">
+								Current Role:{" "}
+								<strong>{managingPerson.role.toUpperCase()}</strong>
+							</span>
+						</div>
+
+						<Select
+							id="edit-role"
+							label="Assign System Role"
+							value={editRole}
+							onChange={(e) =>
+								setEditRole(e.target.value as Exclude<Role, "admin">)
+							}
+						>
+							<option value="requester">Requester (Standard Employee)</option>
+							<option value="assignee">Assignee (Vendor Technician)</option>
+							<option value="supervisor">Supervisor (Department Head)</option>
+						</Select>
+
+						{editRole === "supervisor" && (
+							<Select
+								id="edit-dept"
+								label="Supervised Department"
+								value={editDeptId}
+								onChange={(e) => setEditDeptId(e.target.value)}
+								required
+							>
+								<option value="">-- Choose department --</option>
+								{departments.map((d) => (
+									<option key={d.id} value={d.id}>
+										{d.name}
+									</option>
+								))}
+							</Select>
+						)}
+
+						{editRole === "assignee" && (
+							<Select
+								id="edit-vendor"
+								label="Employing Contractor / Vendor"
+								value={editVendorId}
+								onChange={(e) => setEditVendorId(e.target.value)}
+								required
+							>
+								<option value="">-- Choose vendor --</option>
+								{vendors.map((v) => (
+									<option key={v.id} value={v.id}>
+										{v.name}
+									</option>
+								))}
+							</Select>
+						)}
+					</form>
+				)}
 			</Modal>
 		</div>
 	);

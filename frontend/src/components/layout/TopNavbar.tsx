@@ -1,12 +1,10 @@
-import { Database, LogOut, Menu, RotateCcw, UserCheck } from "lucide-react";
-import { useState } from "react";
+import { LogOut, Menu } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
-import { DEMO_CREDENTIALS } from "../../services/authService";
-import type { Role } from "../../types/api";
 import { Avatar } from "../common/Avatar";
 import { RoleBadge } from "../common/Badge";
+import { ThemeToggle } from "../common/ThemeToggle";
 
 interface TopNavbarProps {
 	onToggleMobileSidebar: () => void;
@@ -17,71 +15,14 @@ export function TopNavbar({
 	onToggleMobileSidebar,
 	pageTitle = "Overview",
 }: TopNavbarProps) {
-	const {
-		user,
-		role,
-		login,
-		switchRole,
-		logout,
-		mockMode,
-		toggleMockMode,
-		resetDemoData,
-	} = useAuth();
+	const { user, role, logout } = useAuth();
 	const { showToast } = useToast();
 	const navigate = useNavigate();
-	const [roleMenuOpen, setRoleMenuOpen] = useState(false);
-
-	const handleRoleSwitch = async (newRole: Role) => {
-		setRoleMenuOpen(false);
-		try {
-			if (!mockMode) {
-				const cred = DEMO_CREDENTIALS[newRole];
-				await login(cred.email, cred.password);
-				showToast(
-					`Switched and authenticated as ${cred.name} (${newRole.toUpperCase()})`,
-					"success",
-				);
-			} else {
-				switchRole(newRole);
-				showToast(`Switched mock persona to ${newRole.toUpperCase()}`, "info");
-			}
-
-			// Route to appropriate default landing for role
-			switch (newRole) {
-				case "requester":
-					navigate("/requester/dashboard");
-					break;
-				case "assignee":
-					navigate("/assignee/tickets");
-					break;
-				case "supervisor":
-					navigate("/supervisor/dashboard");
-					break;
-				case "admin":
-					navigate("/admin/dashboard");
-					break;
-			}
-		} catch (err) {
-			showToast(
-				err instanceof Error ? err.message : "Failed to switch role",
-				"error",
-			);
-		}
-	};
 
 	const handleSignOut = () => {
 		logout();
 		navigate("/login");
 		showToast("Signed out successfully", "info");
-	};
-
-	const handleResetData = () => {
-		resetDemoData();
-		showToast(
-			"Reset mock tickets, comments, and people data to initial state",
-			"success",
-		);
-		window.location.reload();
 	};
 
 	return (
@@ -99,95 +40,17 @@ export function TopNavbar({
 			</div>
 
 			<div className="navbar-right">
-				{/* Mock Mode / Live API Toggle */}
-				<button
-					type="button"
-					className={`mode-indicator-pill ${mockMode ? "pill-mock" : "pill-live"}`}
-					onClick={() => {
-						const next = !mockMode;
-						toggleMockMode(next);
-						showToast(
-							next
-								? "Switched to Mock Data Mode (persistent demo store)"
-								: "Switched to Live Backend Mode (proxies to /api/v1)",
-							"info",
-						);
-					}}
-					title="Click to toggle between Mock Mode and Live Backend Mode"
-				>
-					<Database size={14} />
-					<span>{mockMode ? "Demo / Mock Mode" : "Live Backend (/api)"}</span>
-				</button>
-
-				{mockMode && (
-					<button
-						type="button"
-						className="icon-action-btn"
-						onClick={handleResetData}
-						title="Reset mock data to fresh defaults"
-					>
-						<RotateCcw size={16} />
-					</button>
-				)}
-
-				{/* Role Switcher Menu */}
-				<div className="relative">
-					<button
-						type="button"
-						className="role-switch-trigger"
-						onClick={() => setRoleMenuOpen(!roleMenuOpen)}
-					>
-						<UserCheck size={15} className="text-primary" />
-						<span className="switch-label">Role:</span>
-						<RoleBadge role={role} size="sm" />
-					</button>
-
-					{roleMenuOpen && (
-						<div className="role-menu-dropdown" role="menu">
-							<div className="dropdown-header">SWITCH ACTIVE ROLE</div>
-							<button
-								type="button"
-								className={`dropdown-item ${role === "requester" ? "active" : ""}`}
-								onClick={() => handleRoleSwitch("requester")}
-							>
-								<div className="item-title">Requester</div>
-								<div className="item-sub">Alice Chen (Service Requester)</div>
-							</button>
-							<button
-								type="button"
-								className={`dropdown-item ${role === "assignee" ? "active" : ""}`}
-								onClick={() => handleRoleSwitch("assignee")}
-							>
-								<div className="item-title">Assignee</div>
-								<div className="item-sub">Carlos Mendoza (Field Tech)</div>
-							</button>
-							<button
-								type="button"
-								className={`dropdown-item ${role === "supervisor" ? "active" : ""}`}
-								onClick={() => handleRoleSwitch("supervisor")}
-							>
-								<div className="item-title">Supervisor</div>
-								<div className="item-sub">David Miller (Facilities Lead)</div>
-							</button>
-							<button
-								type="button"
-								className={`dropdown-item ${role === "admin" ? "active" : ""}`}
-								onClick={() => handleRoleSwitch("admin")}
-							>
-								<div className="item-title">Administrator</div>
-								<div className="item-sub">Administrator (System Admin)</div>
-							</button>
-						</div>
-					)}
-				</div>
+				{/* Dark Mode Toggle */}
+				<ThemeToggle />
 
 				<div className="navbar-divider" />
 
-				{/* User Profile & Sign Out */}
+				{/* User Profile, Assigned Role, and Sign Out */}
 				<div className="user-profile-menu">
 					<Avatar name={user?.name || "User"} size="sm" />
 					<div className="user-meta">
 						<span className="user-name">{user?.name || "Support User"}</span>
+						<RoleBadge role={role} size="sm" />
 					</div>
 					<button
 						type="button"
