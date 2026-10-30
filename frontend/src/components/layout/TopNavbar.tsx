@@ -1,10 +1,12 @@
-import { LogOut, Menu } from "lucide-react";
+import { KeyRound, LogOut, Menu } from "lucide-react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { Avatar } from "../common/Avatar";
 import { RoleBadge } from "../common/Badge";
 import { ThemeToggle } from "../common/ThemeToggle";
+import { ChangePasswordModal } from "./ChangePasswordModal";
 
 interface TopNavbarProps {
 	onToggleMobileSidebar: () => void;
@@ -15,9 +17,10 @@ export function TopNavbar({
 	onToggleMobileSidebar,
 	pageTitle = "Overview",
 }: TopNavbarProps) {
-	const { user, role, logout } = useAuth();
+	const { user, role, logout, mockMode } = useAuth();
 	const { showToast } = useToast();
 	const navigate = useNavigate();
+	const [passwordModalOpen, setPasswordModalOpen] = useState(false);
 
 	const handleSignOut = () => {
 		logout();
@@ -52,6 +55,17 @@ export function TopNavbar({
 						<span className="user-name">{user?.name || "Support User"}</span>
 						<RoleBadge role={role} size="sm" />
 					</div>
+					{!mockMode && (
+						<button
+							type="button"
+							className="icon-action-btn text-muted"
+							onClick={() => setPasswordModalOpen(true)}
+							title="Change password"
+							aria-label="Change password"
+						>
+							<KeyRound size={16} />
+						</button>
+					)}
 					<button
 						type="button"
 						className="icon-action-btn text-muted hover-danger"
@@ -63,6 +77,11 @@ export function TopNavbar({
 					</button>
 				</div>
 			</div>
+
+			<ChangePasswordModal
+				isOpen={passwordModalOpen}
+				onClose={() => setPasswordModalOpen(false)}
+			/>
 		</header>
 	);
 }
