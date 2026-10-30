@@ -119,9 +119,9 @@ async def seed_database() -> None:
             accounts = [
                 (
                     "Administrator",
-                    "admin@example.com",
+                    settings.admin_email or "admin@example.com",
                     "+1-555-0100",
-                    "adminpassword123",
+                    settings.admin_password or "adminpassword123",
                     Role.admin,
                     None,
                     None,
@@ -166,11 +166,12 @@ async def seed_database() -> None:
                         "UPDATE person SET name = %s, phone = %s, role = %s, vendor_id = %s, department_id = %s WHERE id = %s",
                         (name, phone, role.value, v_id, d_id, p_id),
                     )
-                    pw_hash = hash_password(pwd)
+                    # Never touch an existing password: re-running the seed must not
+                    # reset a real account to its well-known demo credential.
                     await conn.execute(
-                        "INSERT INTO person_credential (person_id, password_hash) VALUES (%s, %s)"
-                        " ON CONFLICT (person_id) DO UPDATE SET password_hash = EXCLUDED.password_hash",
-                        (p_id, pw_hash),
+                        "INSERT INTO person_credential (person_id, password_hash)"
+                        " VALUES (%s, %s) ON CONFLICT (person_id) DO NOTHING",
+                        (p_id, hash_password(pwd)),
                     )
                 else:
                     cur = await conn.execute(
@@ -188,9 +189,12 @@ async def seed_database() -> None:
                 person_ids[email] = p_id
 
             # 6. Seed Tickets (if none exist for Alice)
+            requester_id = person_ids["requester@example.com"]
+            supervisor_id = person_ids["supervisor@example.com"]
+            assignee_id = person_ids["assignee@example.com"]
             cur = await conn.execute(
                 "SELECT count(*) FROM ticket WHERE requester_id = %s",
-                (person_ids["requester@example.com"],),
+                (requester_id,),
             )
             count_row = await cur.fetchone()
             ticket_count = count_row[0] if count_row else 0
@@ -208,9 +212,9 @@ async def seed_database() -> None:
                         "Central Utility Plant - Sublevel 1",
                         TicketPriority.critical.value,
                         TicketStatus.in_progress.value,
-                        person_ids["requester@example.com"],
+                        requester_id,
                         chiller_asset,
-                        person_ids["supervisor@example.com"],
+                        supervisor_id,
                         now,
                     ),
                 )
@@ -224,13 +228,13 @@ async def seed_database() -> None:
                     " (%s, 'assigned', 'in_progress', %s, %s)",
                     (
                         t1,
-                        person_ids["requester@example.com"],
+                        requester_id,
                         now,
                         t1,
-                        person_ids["supervisor@example.com"],
+                        supervisor_id,
                         now,
                         t1,
-                        person_ids["assignee@example.com"],
+                        assignee_id,
                         now,
                     ),
                 )
@@ -238,7 +242,7 @@ async def seed_database() -> None:
                 # T1 assignment
                 await conn.execute(
                     "INSERT INTO ticket_assignment (ticket_id, assignee_id, assigned_at) VALUES (%s, %s, %s)",
-                    (t1, person_ids["assignee@example.com"], now),
+                    (t1, assignee_id, now),
                 )
 
                 # T1 comments
@@ -249,13 +253,13 @@ async def seed_database() -> None:
                     " (%s, %s, 'On site now. Bearing lubrication pump replaced; testing cycle.', %s)",
                     (
                         t1,
-                        person_ids["requester@example.com"],
+                        requester_id,
                         now,
                         t1,
-                        person_ids["supervisor@example.com"],
+                        supervisor_id,
                         now,
                         t1,
-                        person_ids["assignee@example.com"],
+                        assignee_id,
                         now,
                     ),
                 )
@@ -266,7 +270,7 @@ async def seed_database() -> None:
                     " (%s, %s, %s, %s, %s)",
                     (
                         t1,
-                        person_ids["requester@example.com"],
+                        requester_id,
                         AttachmentKind.issue_evidence.value,
                         "https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=800",
                         now,
@@ -283,9 +287,9 @@ async def seed_database() -> None:
                         "Tower 1, 14th Floor, Room 1402",
                         TicketPriority.high.value,
                         TicketStatus.assigned.value,
-                        person_ids["requester@example.com"],
+                        requester_id,
                         chiller_asset,
-                        person_ids["supervisor@example.com"],
+                        supervisor_id,
                         now,
                     ),
                 )
@@ -296,16 +300,16 @@ async def seed_database() -> None:
                     " (%s, 'open', 'assigned', %s, %s)",
                     (
                         t2,
-                        person_ids["requester@example.com"],
+                        requester_id,
                         now,
                         t2,
-                        person_ids["supervisor@example.com"],
+                        supervisor_id,
                         now,
                     ),
                 )
                 await conn.execute(
                     "INSERT INTO ticket_assignment (ticket_id, assignee_id, assigned_at) VALUES (%s, %s, %s)",
-                    (t2, person_ids["assignee@example.com"], now),
+                    (t2, assignee_id, now),
                 )
 
                 # Ticket 3: Open (Triage queue)
@@ -317,7 +321,7 @@ async def seed_database() -> None:
                         "Intermittent packet loss reported on 3rd floor marketing department trunk line.",
                         "Server Room B - Rack 12",
                         TicketPriority.high.value,
-                        person_ids["requester@example.com"],
+                        requester_id,
                         now,
                     ),
                 )
@@ -325,7 +329,7 @@ async def seed_database() -> None:
                 await conn.execute(
                     "INSERT INTO ticket_status_history (ticket_id, from_status, to_status, changed_by_id, changed_at) VALUES"
                     " (%s, NULL, 'open', %s, %s)",
-                    (t3, person_ids["requester@example.com"], now),
+                    (t3, requester_id, now),
                 )
 
                 # Ticket 4: Open (Triage queue)
@@ -337,7 +341,7 @@ async def seed_database() -> None:
                         "Low pressure across all fixtures on second floor west wing.",
                         "Building C - 2nd Floor",
                         TicketPriority.medium.value,
-                        person_ids["requester@example.com"],
+                        requester_id,
                         now,
                     ),
                 )
@@ -345,7 +349,7 @@ async def seed_database() -> None:
                 await conn.execute(
                     "INSERT INTO ticket_status_history (ticket_id, from_status, to_status, changed_by_id, changed_at) VALUES"
                     " (%s, NULL, 'open', %s, %s)",
-                    (t4, person_ids["requester@example.com"], now),
+                    (t4, requester_id, now),
                 )
 
                 # Ticket 5: Resolved / Closed
@@ -357,7 +361,7 @@ async def seed_database() -> None:
                         "Quarterly routine maintenance and battery pack inspection.",
                         "East Wing Stairwell 4",
                         TicketPriority.low.value,
-                        person_ids["requester@example.com"],
+                        requester_id,
                         now,
                         now,
                     ),
@@ -369,10 +373,10 @@ async def seed_database() -> None:
                     " (%s, 'open', 'closed', %s, %s)",
                     (
                         t5,
-                        person_ids["requester@example.com"],
+                        requester_id,
                         now,
                         t5,
-                        person_ids["requester@example.com"],
+                        requester_id,
                         now,
                     ),
                 )
