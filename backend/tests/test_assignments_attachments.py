@@ -366,3 +366,42 @@ def test_cannot_delete_a_vendor_responsible_for_assets(
     ]
     response = db_client.delete(f"/api/v1/vendors/{vendor}", headers=scene.admin)
     assert response.status_code == 409
+
+
+def test_assignee_can_read_the_requester_while_assigned(
+    scene: Scene, db_client: TestClient
+) -> None:
+    person_url = f"/api/v1/people/{scene.owner_id}"
+    on_ticket, on_headers = scene.assignee()
+    _, stranger = scene.assignee()
+
+    assert db_client.get(person_url, headers=on_headers).status_code == 403
+
+    a = scene.assign(on_ticket)
+    assert a.status_code == 201, a.text
+    shown = db_client.get(person_url, headers=on_headers)
+    assert shown.status_code == 200
+    assert shown.json()["id"] == str(scene.owner_id)
+    # Only people on one of their tickets get to see the requester.
+    assert db_client.get(person_url, headers=stranger).status_code == 403
+
+    unassigned = db_client.delete(
+        f"{scene.url}/assignments/{a.json()['id']}", headers=scene.sup
+    )
+    assert unassigned.status_code == 204
+    assert db_client.get(person_url, headers=on_headers).status_code == 403
+
+
+def test_requester_cannot_read_another_requester_even_via_assignee(
+    scene: Scene, db_client: TestClient
+) -> None:
+    other = scene.seed.person(Role.requester)
+    on_ticket, on_headers = scene.assignee()
+    scene.assign(on_ticket)
+    # Being on the owner's ticket says nothing about unrelated requesters.
+    assert (
+        db_client.get(f"/api/v1/people/{other}", headers=on_headers).status_code == 403
+    )
+    assert (
+        db_client.get(f"/api/v1/people/{other}", headers=scene.owner).status_code == 403
+    )

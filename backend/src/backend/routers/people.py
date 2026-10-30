@@ -13,6 +13,7 @@ from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND
 from backend.routers.deps import PaginationDep
 from backend.schemas.enums import Role
 from backend.schemas.people import Person, PersonPage, RoleAssignment
+from backend.ticket_access import TICKET_FROM, visibility
 
 router = APIRouter(prefix="/people", tags=["people"])
 
@@ -120,14 +121,33 @@ async def assign_role(
     )
 
 
+async def _shares_a_ticket(
+    pool: PoolDep, requester_id: UUID, user: CurrentUserDep
+) -> bool:
+    """Whether `user` can see a ticket that `requester_id` raised."""
+    condition, extra = visibility(user)
+    where = ["t.requester_id = %s"]
+    params: list[object] = [requester_id]
+    if condition:
+        where.append(condition)
+        params += extra
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            f"SELECT 1 FROM {TICKET_FROM} WHERE {' AND '.join(where)} LIMIT 1",
+            params,
+        )
+        return await cur.fetchone() is not None
+
+
 async def _visible_person(
     person_id: UUID, user: CurrentUserDep, pool: PoolDep
 ) -> Person:
     """The person, if `user` may see them (404 if absent, 403 if hidden).
 
     Requesters' details are private: only they, supervisors and admins can read
-    them. Staff profiles are visible to everyone so people can see who is
-    handling their ticket.
+    them, plus an assignee currently working on one of their tickets. Staff
+    profiles are visible to everyone so people can see who is handling their
+    ticket.
     """
     person = await fetch_or_404(
         pool,
@@ -140,6 +160,7 @@ async def _visible_person(
         person.role is Role.requester
         and person.id != user.id
         and user.role not in (Role.supervisor, Role.admin)
+        and not await _shares_a_ticket(pool, person.id, user)
     ):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Insufficient role")
     return person
@@ -148,6 +169,11 @@ async def _visible_person(
 @router.get(
     "/{person_id}",
     summary="Get a person",
+    description=(
+        "Staff profiles are visible to everyone. A requester's profile is visible"
+        " to that requester, supervisors, admins, and an assignee currently"
+        " assigned to one of their tickets."
+    ),
     responses={**NOT_FOUND, **FORBIDDEN},
 )
 async def get_person(person_id: UUID, user: CurrentUserDep, pool: PoolDep) -> Person:
