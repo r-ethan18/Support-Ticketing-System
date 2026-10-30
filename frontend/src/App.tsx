@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/layout/AppShell";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { ThemeProvider } from "./context/ThemeContext";
 import { ToastProvider } from "./context/ToastContext";
 import { AdminDashboard } from "./pages/admin/AdminDashboard";
 import { AdminTicketsPage } from "./pages/admin/AdminTicketsPage";
@@ -218,11 +219,13 @@ function AppRoutes() {
 export default function App() {
 	return (
 		<BrowserRouter>
-			<ToastProvider>
-				<AuthProvider>
-					<AppRoutes />
-				</AuthProvider>
-			</ToastProvider>
+			<ThemeProvider>
+				<ToastProvider>
+					<AuthProvider>
+						<AppRoutes />
+					</AuthProvider>
+				</ToastProvider>
+			</ThemeProvider>
 		</BrowserRouter>
 	);
 }

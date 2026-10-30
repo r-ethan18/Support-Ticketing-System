@@ -638,6 +638,44 @@ export const ticketService = {
 		return found;
 	},
 
+	/** Admin-only: create another admin with full system privileges. */
+	async createAdminUser(body: {
+		name: string;
+		email: string;
+		phone: string;
+		password: string;
+	}): Promise<Person> {
+		if (!isMockMode()) {
+			return await apiRequest<Person>("/admins", {
+				method: "POST",
+				body: JSON.stringify(body),
+			});
+		}
+		const people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		const person: Person = {
+			id: `p-${Date.now()}`,
+			name: body.name,
+			email: body.email,
+			phone: body.phone,
+			role: "admin",
+		};
+		setStore(KEYS.PEOPLE, [person, ...people]);
+		return person;
+	},
+
+	/** Admin-only: delete/deactivate a person account. */
+	async deletePerson(personId: string): Promise<void> {
+		if (!isMockMode()) {
+			await apiRequest<void>(`/people/${personId}`, {
+				method: "DELETE",
+			});
+			return;
+		}
+		let people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		people = people.filter((p) => p.id !== personId);
+		setStore(KEYS.PEOPLE, people);
+	},
+
 	async getPerson(personId: string): Promise<Person> {
 		if (!isMockMode()) {
 			return await apiRequest<Person>(`/people/${personId}`);
