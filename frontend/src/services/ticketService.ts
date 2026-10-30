@@ -30,6 +30,31 @@ import {
 	INITIAL_VENDORS,
 } from "./mockData";
 
+/** What the backend accepts for attachments (see POST .../attachments). */
+export const ATTACHMENT_ACCEPT =
+	"image/png,image/jpeg,image/gif,image/webp,application/pdf";
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+/** Why `file` cannot be attached, or null if it can. */
+export function attachmentProblem(file: File): string | null {
+	if (!ATTACHMENT_ACCEPT.split(",").includes(file.type)) {
+		return "Only PNG, JPEG, GIF, WebP images and PDFs can be attached.";
+	}
+	if (file.size === 0) return "That file is empty.";
+	if (file.size > MAX_ATTACHMENT_BYTES) {
+		return `Files can be at most ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB.`;
+	}
+	return null;
+}
+
+const readAsDataUrl = (file: File): Promise<string> =>
+	new Promise((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onload = () => resolve(String(reader.result));
+		reader.onerror = () => reject(reader.error);
+		reader.readAsDataURL(file);
+	});
+
 // Local storage keys for persistent mock store in browser
 const KEYS = {
 	TICKETS: "sts_mock_tickets",
@@ -515,19 +540,21 @@ export const ticketService = {
 	async addAttachment(
 		ticketId: string,
 		kind: "issue_evidence" | "completion_proof",
-		storageUrl: string,
+		file: File,
 		uploadedById: string,
 	): Promise<TicketAttachment> {
 		if (!isMockMode()) {
+			const form = new FormData();
+			form.append("kind", kind);
+			form.append("file", file);
 			return await apiRequest<TicketAttachment>(
 				`/tickets/${ticketId}/attachments`,
-				{
-					method: "POST",
-					body: JSON.stringify({ kind, storageUrl }),
-				},
+				{ method: "POST", body: form },
 			);
 		}
 
+		// Mock mode has no server: keep the file in the browser's store.
+		const storageUrl = await readAsDataUrl(file);
 		const attachments = getStore<TicketAttachment>(
 			KEYS.ATTACHMENTS,
 			INITIAL_ATTACHMENTS,
@@ -538,11 +565,19 @@ export const ticketService = {
 			uploadedById,
 			kind,
 			storageUrl,
+			filename: file.name,
+			contentType: file.type,
+			sizeBytes: file.size,
 			uploadedAt: new Date().toISOString(),
 		};
 		attachments.push(newAttachment);
 		setStore(KEYS.ATTACHMENTS, attachments);
 		return newAttachment;
+	},
+
+	/** Fetch an uploaded file (they need the Bearer token, so no plain <img src>). */
+	async downloadAttachment(attachment: TicketAttachment): Promise<Blob> {
+		return await apiRequest<Blob>(attachment.storageUrl, { as: "blob" });
 	},
 
 	async listStatusHistory(

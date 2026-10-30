@@ -29,8 +29,15 @@ services:
       - DB_NAME=${POSTGRES_DB:-sts}
       - DB_USER=${POSTGRES_USER:-sts}
       - DB_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      - S3_ENDPOINT=garage:3900
+      - S3_REGION=garage
+      - S3_BUCKET=sts-attachments
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:?set S3_ACCESS_KEY (GK + 32 hex chars) in .env}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:?set S3_SECRET_KEY (64 hex chars) in .env}
     depends_on:
       db:
+        condition: service_healthy
+      garage:
         condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
@@ -85,6 +92,30 @@ services:
         aliases:
           - db
 
+  # Attachment storage (S3-compatible). Not routed by Traefik: files are served
+  # by the backend. Same config file as the cluster (k8s/base/garage.toml).
+  garage:
+    image: dxflrs/garage:v2.5.0
+    container_name: sts-garage
+    restart: unless-stopped
+    command: [ "/garage", "server", "--single-node", "--default-bucket" ]
+    environment:
+      - GARAGE_RPC_SECRET=${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET (64 hex chars) in .env}
+      - GARAGE_DEFAULT_ACCESS_KEY=${S3_ACCESS_KEY:?set S3_ACCESS_KEY (GK + 32 hex chars) in .env}
+      - GARAGE_DEFAULT_SECRET_KEY=${S3_SECRET_KEY:?set S3_SECRET_KEY (64 hex chars) in .env}
+      - GARAGE_DEFAULT_BUCKET=sts-attachments
+    volumes:
+      - ./k8s/base/garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    healthcheck:
+      test: [ "CMD", "/garage", "status" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sts-network
+
 networks:
   sts-network:
     name: sts-network
@@ -92,3 +123,5 @@ networks:
 
 volumes:
   postgres_data:
+  garage_meta:
+  garage_data:

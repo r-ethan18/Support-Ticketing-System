@@ -3,7 +3,9 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.config import get_settings
 from backend.schemas.enums import Role
+from backend.storage import get_object_store
 
 from .conftest import Seeder, login_as
 
@@ -166,26 +168,45 @@ def test_unassign_does_not_reopen_in_progress_ticket(
     assert scene.status() == "in_progress"
 
 
+PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+
+
+def upload(
+    client,
+    url,
+    headers,
+    kind="issue_evidence",
+    *,
+    name="leak.png",
+    data=PNG,
+    content_type="image/png",
+):
+    return client.post(
+        url,
+        data={"kind": kind},
+        files={"file": (name, data, content_type)},
+        headers=headers,
+    )
+
+
 def test_requester_adds_evidence_assignee_adds_proof(
-    scene: Scene, db_client: TestClient
+    scene: Scene, db_client: TestClient, object_store
 ) -> None:
     person, assignee = scene.assignee()
     scene.assign(person)
     url = f"{scene.url}/attachments"
 
-    evidence = db_client.post(
-        url,
-        json={"kind": "issue_evidence", "storageUrl": "s3://b/leak.jpg"},
-        headers=scene.owner,
-    )
+    evidence = upload(db_client, url, scene.owner)
     assert evidence.status_code == 201, evidence.text
-    assert evidence.json()["uploadedById"] == str(scene.owner_id)
+    body = evidence.json()
+    assert body["uploadedById"] == str(scene.owner_id)
+    assert body["filename"] == "leak.png"
+    assert body["contentType"] == "image/png"
+    assert body["sizeBytes"] == len(PNG)
+    assert body["storageUrl"] == f"{url}/{body['id']}/content"
+    assert len(object_store.objects) == 1
 
-    proof = db_client.post(
-        url,
-        json={"kind": "completion_proof", "storageUrl": "s3://b/fixed.jpg"},
-        headers=assignee,
-    )
+    proof = upload(db_client, url, assignee, "completion_proof", name="fixed.png")
     assert proof.status_code == 201, proof.text
 
     everything = db_client.get(url, headers=scene.sup).json()
@@ -196,36 +217,149 @@ def test_requester_adds_evidence_assignee_adds_proof(
     assert [a["id"] for a in only_proof.json()] == [proof.json()["id"]]
 
 
+def test_attachment_content_is_served_to_people_who_see_the_ticket(
+    scene: Scene, db_client: TestClient
+) -> None:
+    person, assignee = scene.assignee()
+    scene.assign(person)
+    created = upload(db_client, f"{scene.url}/attachments", scene.owner).json()
+
+    for headers in (scene.owner, scene.sup, assignee, scene.admin):
+        got = db_client.get(created["storageUrl"], headers=headers)
+        assert got.status_code == 200
+        assert got.content == PNG
+        assert got.headers["content-type"] == "image/png"
+        assert got.headers["content-disposition"].startswith("inline")
+        assert got.headers["x-content-type-options"] == "nosniff"
+
+    _, stranger = login_as(db_client, scene.seed, Role.requester)
+    assert db_client.get(created["storageUrl"], headers=stranger).status_code == 404
+    assert db_client.get(created["storageUrl"]).status_code == 401
+
+
+def test_pdfs_download_as_attachments(scene: Scene, db_client: TestClient) -> None:
+    created = upload(
+        db_client,
+        f"{scene.url}/attachments",
+        scene.owner,
+        name="receipt.pdf",
+        data=b"%PDF-1.7 x",
+        content_type="application/pdf",
+    ).json()
+    got = db_client.get(created["storageUrl"], headers=scene.owner)
+    assert got.headers["content-disposition"].startswith("attachment")
+
+
+def test_unknown_attachment_content_is_404(scene: Scene, db_client: TestClient) -> None:
+    missing = f"{scene.url}/attachments/{uuid4()}/content"
+    assert db_client.get(missing, headers=scene.owner).status_code == 404
+
+
+def test_upload_rejects_bad_files(
+    scene: Scene, db_client: TestClient, monkeypatch, object_store
+) -> None:
+    url = f"{scene.url}/attachments"
+    html = upload(
+        db_client,
+        url,
+        scene.owner,
+        name="x.html",
+        data=b"<script>",
+        content_type="text/html",
+    )
+    assert html.status_code == 415
+    assert upload(db_client, url, scene.owner, data=b"").status_code == 422
+
+    monkeypatch.setenv("MAX_UPLOAD_BYTES", "16")
+    get_settings.cache_clear()
+    assert upload(db_client, url, scene.owner, data=b"x" * 17).status_code == 413
+    assert upload(db_client, url, scene.owner, data=b"x" * 16).status_code == 201
+
+    no_file = db_client.post(url, data={"kind": "issue_evidence"}, headers=scene.owner)
+    assert no_file.status_code == 422
+    bad_kind = db_client.post(
+        url,
+        data={"kind": "selfie"},
+        files={"file": ("a.png", PNG, "image/png")},
+        headers=scene.owner,
+    )
+    assert bad_kind.status_code == 422
+    assert len(object_store.objects) == 1
+
+
+def test_upload_filename_is_reduced_to_a_base_name(
+    scene: Scene, db_client: TestClient
+) -> None:
+    created = upload(
+        db_client, f"{scene.url}/attachments", scene.owner, name="../../etc/pass.png"
+    )
+    assert created.json()["filename"] == "pass.png"
+
+
 def test_attachment_permissions(scene: Scene, db_client: TestClient) -> None:
     person, assignee = scene.assignee()
     scene.assign(person)
     _, stranger = login_as(db_client, scene.seed, Role.requester)
     url = f"{scene.url}/attachments"
-    evidence = {"kind": "issue_evidence", "storageUrl": "x"}
-    proof = {"kind": "completion_proof", "storageUrl": "x"}
 
-    assert db_client.post(url, json=proof, headers=scene.owner).status_code == 403
-    assert db_client.post(url, json=evidence, headers=assignee).status_code == 403
-    assert db_client.post(url, json=evidence, headers=scene.sup).status_code == 403
-    assert db_client.post(url, json=proof, headers=scene.sup).status_code == 403
-    assert db_client.post(url, json=evidence, headers=stranger).status_code == 404
-    assert db_client.post(url, json=proof, headers=scene.admin).status_code == 201
-    assert (
-        db_client.post(
-            url, json={"kind": "issue_evidence", "storageUrl": ""}, headers=scene.owner
-        ).status_code
-        == 422
-    )
+    def post(headers, kind):
+        return upload(db_client, url, headers, kind).status_code
+
+    assert post(scene.owner, "completion_proof") == 403
+    assert post(assignee, "issue_evidence") == 403
+    assert post(scene.sup, "issue_evidence") == 403
+    assert post(scene.sup, "completion_proof") == 403
+    assert post(stranger, "issue_evidence") == 404
+    assert post(scene.admin, "completion_proof") == 201
 
 
 def test_no_attachments_on_closed_ticket(scene: Scene, db_client: TestClient) -> None:
     db_client.patch(scene.url, json={"status": "closed"}, headers=scene.sup)
-    response = db_client.post(
-        f"{scene.url}/attachments",
-        json={"kind": "issue_evidence", "storageUrl": "x"},
-        headers=scene.owner,
-    )
+    response = upload(db_client, f"{scene.url}/attachments", scene.owner)
     assert response.status_code == 409
+
+
+def test_legacy_external_link_attachments_still_list(
+    scene: Scene, db_client: TestClient
+) -> None:
+    scene.seed.insert(
+        "ticket_attachment",
+        ticket_id=scene.ticket,
+        uploaded_by_id=scene.owner_id,
+        kind="issue_evidence",
+        storage_url="https://example.com/old.jpg",
+    )
+    listed = db_client.get(f"{scene.url}/attachments", headers=scene.owner).json()
+    assert listed[0]["storageUrl"] == "https://example.com/old.jpg"
+    assert listed[0]["filename"] is None
+    content = f"{scene.url}/attachments/{listed[0]['id']}/content"
+    assert db_client.get(content, headers=scene.owner).status_code == 404
+
+
+def test_uploads_are_removed_with_their_ticket(
+    scene: Scene, db_client: TestClient, object_store
+) -> None:
+    upload(db_client, f"{scene.url}/attachments", scene.owner)
+    assert len(object_store.objects) == 1
+    assert db_client.delete(scene.url, headers=scene.admin).status_code == 204
+    assert object_store.objects == {}
+
+
+def test_uploads_are_removed_with_a_deleted_requesters_closed_ticket(
+    scene: Scene, db_client: TestClient, object_store
+) -> None:
+    upload(db_client, f"{scene.url}/attachments", scene.owner)
+    db_client.patch(scene.url, json={"status": "closed"}, headers=scene.owner)
+    db_client.delete(f"/api/v1/people/{scene.owner_id}", headers=scene.admin)
+    assert object_store.objects == {}
+
+
+def test_uploads_report_unavailable_without_storage(
+    scene: Scene, db_client: TestClient
+) -> None:
+    del db_client.app.dependency_overrides[get_object_store]
+    response = upload(db_client, f"{scene.url}/attachments", scene.owner)
+    assert response.status_code == 503
 
 
 def test_deleting_an_assignee_unassigns_them_and_keeps_history(

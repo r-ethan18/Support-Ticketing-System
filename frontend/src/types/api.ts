@@ -89,7 +89,11 @@ export interface TicketAttachment {
 	ticketId: string;
 	uploadedById: string | null;
 	kind: AttachmentKind;
+	/** Uploads: an API path that needs the Bearer token. Old rows: an external URL. */
 	storageUrl: string;
+	filename?: string | null;
+	contentType?: string | null;
+	sizeBytes?: number | null;
 	uploadedAt: string;
 }
 

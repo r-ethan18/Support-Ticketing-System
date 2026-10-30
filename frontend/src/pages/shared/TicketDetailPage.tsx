@@ -22,6 +22,7 @@ import {
 	useState,
 } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { AttachmentPreview } from "../../components/common/AttachmentPreview";
 import { Avatar } from "../../components/common/Avatar";
 import { PriorityBadge, StatusBadge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
@@ -33,7 +34,12 @@ import { Skeleton } from "../../components/common/Skeleton";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { useTicketStream } from "../../hooks/useTicketStream";
-import { isMockMode, ticketService } from "../../services/ticketService";
+import {
+	ATTACHMENT_ACCEPT,
+	attachmentProblem,
+	isMockMode,
+	ticketService,
+} from "../../services/ticketService";
 import type {
 	Asset,
 	AttachmentKind,
@@ -85,7 +91,8 @@ export function TicketDetailPage() {
 
 	// Attachment modal
 	const [attachModalOpen, setAttachModalOpen] = useState(false);
-	const [attachUrl, setAttachUrl] = useState("");
+	const [attachFile, setAttachFile] = useState<File | null>(null);
+	const [attachFileKey, setAttachFileKey] = useState(0);
 	const [attachKind, setAttachKind] =
 		useState<AttachmentKind>("issue_evidence");
 	const [attaching, setAttaching] = useState(false);
@@ -453,18 +460,24 @@ export function TicketDetailPage() {
 
 	const handleAddAttachment = async (e: FormEvent) => {
 		e.preventDefault();
-		if (!attachUrl.trim()) return;
+		if (!attachFile) return;
+		const fileProblem = attachmentProblem(attachFile);
+		if (fileProblem) {
+			showToast(fileProblem, "error");
+			return;
+		}
 
 		try {
 			setAttaching(true);
 			const newAtt = await ticketService.addAttachment(
 				ticket.id,
 				attachKind,
-				attachUrl.trim(),
+				attachFile,
 				user?.id || "p-user-1",
 			);
 			setAttachments((prev) => [...prev, newAtt]);
-			setAttachUrl("");
+			setAttachFile(null);
+			setAttachFileKey((k) => k + 1);
 			setAttachModalOpen(false);
 			showToast("Attachment uploaded successfully", "success");
 		} catch (_err) {
@@ -713,14 +726,7 @@ export function TicketDetailPage() {
 											return (
 												<div key={att.id} className="attachment-card">
 													<div className="attachment-preview">
-														<img
-															src={att.storageUrl}
-															alt="Ticket attachment"
-															onError={(e) => {
-																(e.target as HTMLImageElement).src =
-																	"https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=800&q=80";
-															}}
-														/>
+														<AttachmentPreview attachment={att} />
 														<span
 															className={`attachment-kind-badge ${att.kind}`}
 														>
@@ -730,6 +736,14 @@ export function TicketDetailPage() {
 														</span>
 													</div>
 													<div className="attachment-info">
+														{att.filename && (
+															<span
+																className="attachment-filename"
+																title={att.filename}
+															>
+																{att.filename}
+															</span>
+														)}
 														<span className="attachment-uploader">
 															By {uploader?.name || "Technician"}
 														</span>
@@ -1112,7 +1126,7 @@ export function TicketDetailPage() {
 				isOpen={attachModalOpen}
 				onClose={() => setAttachModalOpen(false)}
 				title="Attach File or Evidence"
-				description="Add an image URL documenting evidence or proof of repair completion."
+				description="Upload a photo or PDF documenting evidence or proof of repair completion."
 				footer={
 					<div className="flex gap-2 justify-end w-full">
 						<Button
@@ -1147,14 +1161,15 @@ export function TicketDetailPage() {
 					</Select>
 
 					<Input
-						id="modal-attachment-url"
-						label="Image Storage URL"
-						placeholder="https://example.com/photo.jpg"
-						value={attachUrl}
-						onChange={(e) => setAttachUrl(e.target.value)}
+						key={attachFileKey}
+						id="modal-attachment-file"
+						type="file"
+						label="File"
+						accept={ATTACHMENT_ACCEPT}
+						onChange={(e) => setAttachFile(e.target.files?.[0] ?? null)}
 						required
 						leftIcon={<UploadCloud size={16} />}
-						helperText="Paste direct image URL (Unsplash or file server link)"
+						helperText="PNG, JPEG, GIF, WebP or PDF, up to 10 MB"
 					/>
 				</form>
 			</Modal>

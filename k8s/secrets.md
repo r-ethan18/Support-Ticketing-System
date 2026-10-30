@@ -15,6 +15,9 @@ All workloads consume credentials through a single Kubernetes Secret named
 | `DB_PASSWORD` | PostgreSQL password | Use a strong random value |
 | `ADMIN_EMAIL` | Email of the first admin | **Required**; created on first start |
 | `ADMIN_PASSWORD` | Password of the first admin | **Required**, at least 12 characters |
+| `S3_ACCESS_KEY` | Access key Garage creates on first start and the backend uses | `GK` + 32 hex characters |
+| `S3_SECRET_KEY` | Secret for that access key | 64 hex characters |
+| `GARAGE_RPC_SECRET` | Garage's internal RPC secret | 64 hex characters |
 
 ---
 
@@ -30,6 +33,9 @@ JWT_SECRET=$(openssl rand -hex 32)
 DB_PASSWORD=$(openssl rand -hex 20)
 ADMIN_EMAIL=admin@example.com            # change to the real admin address
 ADMIN_PASSWORD=$(openssl rand -hex 16)   # note it down: it is not shown again
+S3_ACCESS_KEY="GK$(openssl rand -hex 16)"
+S3_SECRET_KEY=$(openssl rand -hex 32)
+GARAGE_RPC_SECRET=$(openssl rand -hex 32)
 
 # Ensure the namespace exists
 kubectl create namespace sts-prod --dry-run=client -o yaml | kubectl apply -f -
@@ -42,7 +48,10 @@ kubectl create secret generic sts-secrets \
   --from-literal=DB_USER=sts \
   --from-literal=DB_PASSWORD="${DB_PASSWORD}" \
   --from-literal=ADMIN_EMAIL="${ADMIN_EMAIL}" \
-  --from-literal=ADMIN_PASSWORD="${ADMIN_PASSWORD}"
+  --from-literal=ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+  --from-literal=S3_ACCESS_KEY="${S3_ACCESS_KEY}" \
+  --from-literal=S3_SECRET_KEY="${S3_SECRET_KEY}" \
+  --from-literal=GARAGE_RPC_SECRET="${GARAGE_RPC_SECRET}"
 ```
 
 To verify (keys only, not values):
@@ -72,8 +81,16 @@ kubectl create secret generic sts-secrets \
   --from-literal=DB_PASSWORD="<existing-value>" \
   --from-literal=ADMIN_EMAIL="<existing-value>" \
   --from-literal=ADMIN_PASSWORD="<existing-value>" \
+  --from-literal=S3_ACCESS_KEY="<existing-value>" \
+  --from-literal=S3_SECRET_KEY="<existing-value>" \
+  --from-literal=GARAGE_RPC_SECRET="<existing-value>" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # Restart the backend to pick up the new JWT_SECRET
 kubectl rollout restart deployment/backend -n sts-prod
 ```
+
+Garage creates the access key and bucket from `S3_ACCESS_KEY` / `S3_SECRET_KEY`
+when it starts. Changing them in the Secret is not enough on a cluster that
+already holds data; create a new key with `garage key create` instead (see the
+Garage docs) and keep `GARAGE_RPC_SECRET` as it is.

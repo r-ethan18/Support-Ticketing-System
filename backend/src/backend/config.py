@@ -27,11 +27,29 @@ class DatabaseSettings:
 
 
 @dataclass(frozen=True)
+class StorageSettings:
+    """S3-compatible object storage (Garage in the cluster) for attachments."""
+
+    endpoint: str = ""  # host:port; empty disables uploads
+    access_key: str = ""
+    secret_key: str = ""
+    bucket: str = "sts-attachments"
+    secure: bool = False
+    region: str = "garage"
+    max_upload_bytes: int = 10 * 1024 * 1024
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.endpoint)
+
+
+@dataclass(frozen=True)
 class Settings:
     jwt_secret: str
     access_token_ttl_seconds: int = 3600
     refresh_token_ttl_seconds: int = 30 * 24 * 3600
     database: DatabaseSettings = DatabaseSettings()
+    storage: StorageSettings = StorageSettings()
     # Only used to create the first admin when none exists.
     admin_email: str = ""
     admin_password: str = ""
@@ -69,6 +87,17 @@ def get_settings() -> Settings:
             name=os.environ.get("DB_NAME", "sts"),
             user=os.environ.get("DB_USER", "sts"),
             password=os.environ.get("DB_PASSWORD", ""),
+        ),
+        storage=StorageSettings(
+            endpoint=os.environ.get("S3_ENDPOINT", ""),
+            access_key=os.environ.get("S3_ACCESS_KEY", ""),
+            secret_key=os.environ.get("S3_SECRET_KEY", ""),
+            bucket=os.environ.get("S3_BUCKET", "sts-attachments"),
+            secure=os.environ.get("S3_SECURE", "").lower() in ("1", "true", "yes"),
+            region=os.environ.get("S3_REGION", "garage"),
+            max_upload_bytes=int(
+                os.environ.get("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024))
+            ),
         ),
         admin_email=os.environ.get("ADMIN_EMAIL", ""),
         admin_password=os.environ.get("ADMIN_PASSWORD", ""),

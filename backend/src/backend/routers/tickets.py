@@ -3,17 +3,19 @@ import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Annotated
-from uuid import UUID
+from urllib.parse import quote
+from uuid import UUID, uuid4
 
 import psycopg.errors
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi import status as http
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from psycopg.rows import class_row
 
 from backend.auth import CurrentUserDep, require_roles
+from backend.config import get_settings
 from backend.db import HubDep, PoolDep, fetch_page, like_pattern
-from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND
+from backend.errors import CONFLICT, FORBIDDEN, NOT_FOUND, ErrorResponse
 from backend.pubsub import PubSubHub
 from backend.routers.deps import PaginationDep
 from backend.schemas.enums import (
@@ -29,7 +31,6 @@ from backend.schemas.tickets import (
     TicketAssignment,
     TicketAssignmentCreate,
     TicketAttachment,
-    TicketAttachmentCreate,
     TicketComment,
     TicketCommentCreate,
     TicketCreate,
@@ -37,6 +38,7 @@ from backend.schemas.tickets import (
     TicketStatusHistoryEntry,
     TicketUpdate,
 )
+from backend.storage import ObjectStoreDep, OptionalObjectStoreDep, discard_objects
 from backend.ticket_access import (
     TICKET_COLUMNS,
     TICKET_FROM,
@@ -309,18 +311,49 @@ async def _publish_assignments_changed(hub: PubSubHub, ticket_id: UUID) -> None:
     dependencies=[Depends(require_roles(Role.admin))],
     responses={**NOT_FOUND, **FORBIDDEN},
 )
-async def delete_ticket(ticket_id: UUID, pool: PoolDep, hub: HubDep) -> None:
+async def delete_ticket(
+    ticket_id: UUID, pool: PoolDep, hub: HubDep, store: OptionalObjectStoreDep
+) -> None:
     async with pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT object_key FROM ticket_attachment"
+            " WHERE ticket_id = %s AND object_key IS NOT NULL",
+            (ticket_id,),
+        )
+        keys = [row[0] for row in await cur.fetchall()]
         cur = await conn.execute("DELETE FROM ticket WHERE id = %s", (ticket_id,))
         if cur.rowcount == 0:
             raise HTTPException(http.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    await discard_objects(store, keys)
     await hub.publish(
         ticket_id, {"event": "deleted", "data": {"ticketId": str(ticket_id)}}
     )
 
 
 ASSIGNMENT_COLUMNS = "id, ticket_id, assignee_id, assigned_at, unassigned_at"
-ATTACHMENT_COLUMNS = "id, ticket_id, uploaded_by_id, kind, storage_url, uploaded_at"
+# Uploads are served by this API (the bucket is never exposed), so their
+# `storage_url` is the content route; older rows keep their external link.
+ATTACHMENT_COLUMNS = """
+    id, ticket_id, uploaded_by_id, kind, filename, content_type, size_bytes,
+    uploaded_at,
+    CASE WHEN object_key IS NULL THEN storage_url
+         ELSE '/api/v1/tickets/' || ticket_id || '/attachments/' || id || '/content'
+    END AS storage_url
+"""
+
+ALLOWED_UPLOAD_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+}
+
+
+def _clean_filename(name: str | None) -> str:
+    base = (name or "").replace("\\", "/").rsplit("/", 1)[-1]
+    base = "".join(c for c in base if c.isprintable()).strip()
+    return base[:255] or "file"
 
 
 @router.get(
@@ -503,20 +536,33 @@ async def list_ticket_attachments(
 @router.post(
     "/{ticket_id}/attachments",
     status_code=http.HTTP_201_CREATED,
-    summary="Add an attachment to a ticket",
+    summary="Upload an attachment to a ticket",
     description=(
+        "Multipart upload of an image (PNG, JPEG, GIF, WebP) or PDF.\n\n"
         "`issue_evidence` is added by the ticket's requester, `completion_proof` by"
         " an assignee currently assigned to it. Admins can add either. Closed tickets"
         " take no new attachments."
     ),
-    responses={**NOT_FOUND, **FORBIDDEN, **CONFLICT},
+    responses={
+        **NOT_FOUND,
+        **FORBIDDEN,
+        **CONFLICT,
+        413: {"model": ErrorResponse, "description": "File is too large"},
+        415: {"model": ErrorResponse, "description": "File type is not allowed"},
+        503: {"model": ErrorResponse, "description": "File storage is unavailable"},
+    },
 )
 async def create_ticket_attachment(
-    ticket_id: UUID, body: TicketAttachmentCreate, user: CurrentUserDep, pool: PoolDep
+    ticket_id: UUID,
+    kind: Annotated[AttachmentKind, Form()],
+    file: Annotated[UploadFile, File()],
+    user: CurrentUserDep,
+    pool: PoolDep,
+    store: ObjectStoreDep,
 ) -> TicketAttachment:
     ticket = await get_visible_ticket(pool, ticket_id, user)
     allowed = user.role is Role.admin
-    if body.kind is AttachmentKind.issue_evidence:
+    if kind is AttachmentKind.issue_evidence:
         allowed = allowed or ticket.requester_id == user.id
     elif user.role is Role.assignee:
         # Visibility already means they are currently assigned.
@@ -524,22 +570,104 @@ async def create_ticket_attachment(
     if not allowed:
         raise HTTPException(
             http.HTTP_403_FORBIDDEN,
-            detail=f"You may not add {body.kind.value} to this ticket",
+            detail=f"You may not add {kind.value} to this ticket",
         )
     if ticket.status is TicketStatus.closed:
         raise HTTPException(http.HTTP_409_CONFLICT, detail="Ticket is closed")
-    async with (
-        pool.connection() as conn,
-        conn.cursor(row_factory=class_row(TicketAttachment)) as cur,
-    ):
-        await cur.execute(
-            "INSERT INTO ticket_attachment (ticket_id, uploaded_by_id, kind,"
-            f" storage_url) VALUES (%s, %s, %s, %s) RETURNING {ATTACHMENT_COLUMNS}",
-            (ticket_id, user.id, body.kind.value, body.storage_url),
+    content_type = (file.content_type or "").split(";")[0].strip().lower()
+    if content_type not in ALLOWED_UPLOAD_TYPES:
+        raise HTTPException(
+            http.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Only PNG, JPEG, GIF, WebP images and PDFs can be attached",
         )
-        attachment = await cur.fetchone()
+    limit = get_settings().storage.max_upload_bytes
+    data = await file.read(limit + 1)
+    if len(data) > limit:
+        raise HTTPException(
+            http.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"Files can be at most {limit // (1024 * 1024)} MB",
+        )
+    if not data:
+        raise HTTPException(http.HTTP_422_UNPROCESSABLE_CONTENT, detail="File is empty")
+
+    key = f"tickets/{ticket_id}/{uuid4()}"
+    await store.put(key, data, content_type)
+    try:
+        async with (
+            pool.connection() as conn,
+            conn.cursor(row_factory=class_row(TicketAttachment)) as cur,
+        ):
+            await cur.execute(
+                "INSERT INTO ticket_attachment (ticket_id, uploaded_by_id, kind,"
+                " object_key, filename, content_type, size_bytes)"
+                f" VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING {ATTACHMENT_COLUMNS}",
+                (
+                    ticket_id,
+                    user.id,
+                    kind.value,
+                    key,
+                    _clean_filename(file.filename),
+                    content_type,
+                    len(data),
+                ),
+            )
+            attachment = await cur.fetchone()
+    except Exception:
+        await discard_objects(store, [key])
+        raise
     assert attachment is not None
     return attachment
+
+
+@router.get(
+    "/{ticket_id}/attachments/{attachment_id}/content",
+    summary="Download an attachment's file",
+    description="Streams the uploaded file. Visible to anyone who can see the ticket.",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "The file",
+            "content": {t: {} for t in sorted(ALLOWED_UPLOAD_TYPES)},
+        },
+        **NOT_FOUND,
+        503: {"model": ErrorResponse, "description": "File storage is unavailable"},
+    },
+)
+async def get_ticket_attachment_content(
+    ticket_id: UUID,
+    attachment_id: UUID,
+    user: CurrentUserDep,
+    pool: PoolDep,
+    store: ObjectStoreDep,
+) -> Response:
+    await get_visible_ticket(pool, ticket_id, user)
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT object_key, filename, content_type FROM ticket_attachment"
+            " WHERE id = %s AND ticket_id = %s",
+            (attachment_id, ticket_id),
+        )
+        row = await cur.fetchone()
+    if row is None or row[0] is None:
+        raise HTTPException(http.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    key, filename, content_type = row
+    data = await store.get(key)
+    if data is None:
+        raise HTTPException(http.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    disposition = "inline" if content_type.startswith("image/") else "attachment"
+    return Response(
+        data,
+        media_type=content_type,
+        headers={
+            "Content-Disposition": (
+                f"{disposition}; filename*=UTF-8''{quote(filename or 'file')}"
+            ),
+            # Uploads are user content: never let a browser guess or run them.
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+            "Cache-Control": "private, max-age=3600",
+        },
+    )
 
 
 COMMENT_COLUMNS = "id, ticket_id, author_id, body, created_at"

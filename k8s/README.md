@@ -49,6 +49,7 @@ Internet
 Traefik (IngressClass: traefik)
    │
    ├── /api  ──► backend  (ClusterIP :8000) ──► PostgreSQL StatefulSet (ClusterIP: db:5432)
+   │                                        └──► Garage StatefulSet (ClusterIP: garage:3900)
    │
    └── /     ──► frontend (ClusterIP :3000)
 ```
@@ -56,6 +57,7 @@ Traefik (IngressClass: traefik)
 | Component | Kind | Port | Notes |
 |-----------|------|------|-------|
 | `db` | StatefulSet + Service (ClusterIP) | 5432 | PostgreSQL 17, 2 Gi PVC |
+| `garage` | StatefulSet + Service (ClusterIP) | 3900 | Garage S3-compatible object storage for ticket attachments, 5 Gi data PVC; only the backend may reach it |
 | `backend` | Deployment + Service (ClusterIP) | 8000 | FastAPI via uvicorn |
 | `frontend` | Deployment + Service (ClusterIP) | 3000 | Node.js production server |
 | `sts-ingress` | Ingress | — | Traefik routes `/api` and `/` |
@@ -87,6 +89,8 @@ this on the backend rule.
 k8s/
 ├── base/
 │   ├── postgres.yaml          # StatefulSet + Service (db)
+│   ├── garage.yaml            # StatefulSet + Service + NetworkPolicy (garage)
+│   ├── garage.toml            # Garage config, turned into a ConfigMap
 │   ├── backend.yaml           # Deployment + Service (backend)
 │   ├── frontend.yaml          # Deployment + Service (frontend)
 │   ├── ingress.yaml           # Traefik Ingress
@@ -201,6 +205,9 @@ JWT_SECRET=$(openssl rand -hex 32)
 DB_PASSWORD=$(openssl rand -hex 20)
 ADMIN_EMAIL=admin@example.com            # change to the real admin address
 ADMIN_PASSWORD=$(openssl rand -hex 16)   # note it down: it is not shown again
+S3_ACCESS_KEY="GK$(openssl rand -hex 16)"
+S3_SECRET_KEY=$(openssl rand -hex 32)
+GARAGE_RPC_SECRET=$(openssl rand -hex 32)
 
 kubectl create namespace sts-prod --dry-run=client -o yaml | kubectl apply -f -
 
@@ -211,13 +218,20 @@ kubectl create secret generic sts-secrets \
   --from-literal=DB_USER=sts \
   --from-literal=DB_PASSWORD="${DB_PASSWORD}" \
   --from-literal=ADMIN_EMAIL="${ADMIN_EMAIL}" \
-  --from-literal=ADMIN_PASSWORD="${ADMIN_PASSWORD}"
+  --from-literal=ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+  --from-literal=S3_ACCESS_KEY="${S3_ACCESS_KEY}" \
+  --from-literal=S3_SECRET_KEY="${S3_SECRET_KEY}" \
+  --from-literal=GARAGE_RPC_SECRET="${GARAGE_RPC_SECRET}"
 ```
 
 > JWT_SECRET must be ≥ 32 characters — the backend will refuse to start otherwise.
 > ADMIN_EMAIL and ADMIN_PASSWORD (≥ 12 characters) are required too: on an empty
 > database the backend creates the first admin from them and refuses to start
 > without them.
+> S3_ACCESS_KEY (`GK` + 32 hex characters), S3_SECRET_KEY and GARAGE_RPC_SECRET
+> (64 hex characters each) must have exactly these formats: Garage creates the
+> access key and the `sts-attachments` bucket from them on first start, and the
+> backend uses the same key to store attachments.
 
 ---
 
@@ -347,7 +361,7 @@ kubectl -n sts-prod get pods
 kubectl -n sts-prod get deployments
 
 # Verify StatefulSet
-kubectl -n sts-prod get statefulset postgres
+kubectl -n sts-prod get statefulset postgres garage
 
 # Verify Ingress
 kubectl -n sts-prod get ingress sts-ingress
@@ -361,6 +375,7 @@ Expected output:
 NAME                  READY   STATUS    RESTARTS   AGE
 backend-xxx           1/1     Running   0          2m
 frontend-xxx          1/1     Running   0          2m
+garage-0              1/1     Running   0          2m
 postgres-0            1/1     Running   0          2m
 ```
 
@@ -382,6 +397,19 @@ Common causes:
 - `JWT_SECRET` missing or shorter than 32 characters.
 - Cannot reach `db:5432` — check that the `db` Service exists and the
   PostgreSQL pod is Ready.
+- Cannot reach `garage:3900` — the backend creates the attachment bucket on
+  startup, so Garage must be Ready (`kubectl -n sts-prod logs sts/garage`) and
+  `S3_ACCESS_KEY` / `S3_SECRET_KEY` must exist in `sts-secrets`. Uploads return
+  503 if the backend runs without `S3_ENDPOINT`.
+
+### Attachment uploads fail
+Uploads are limited to 10 MB (`MAX_UPLOAD_BYTES`) and to PNG, JPEG, GIF, WebP
+and PDF. Anything above the backend (a proxy body limit) shows up as a 413 that
+does not come from the API. Files are only served through
+`GET /api/v1/tickets/{id}/attachments/{id}/content`; Garage has no Ingress. To
+look inside the bucket, port-forward `sts/garage` 3900 and point any S3 client
+(e.g. `aws s3 ls --endpoint-url http://localhost:3900`, region `garage`) at it
+with the `S3_*` credentials.
 
 ### PostgreSQL readiness probe fails
 The probe runs `pg_isready -U postgres -d postgres`. If you customised
