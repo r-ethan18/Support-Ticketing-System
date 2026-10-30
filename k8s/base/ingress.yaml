@@ -6,8 +6,9 @@
 #   /     → frontend Service on port 3000
 #
 # The backend's FastAPI routes live under /api/v1/ (e.g. /api/v1/auth/token).
-# Traefik uses longest-prefix matching, so /api has higher specificity than /
-# and will not be sent to the frontend.
+# Traefik's default priority is the rule length, so /api beats /. Do not set
+# traefik.ingress.kubernetes.io/router.priority: it applies to every path of
+# the Ingress, which makes both routers tie and can send /api to the frontend.
 #
 # Path rewriting: The backend expects to receive requests with the /api prefix
 # intact (all routes are declared under /api/v1/). No path strip is needed.
@@ -15,10 +16,6 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: sts-ingress
-  annotations:
-    # Raise the /api rule priority so it is evaluated before the catch-all /.
-    # Traefik respects this annotation on Ingress resources.
-    traefik.ingress.kubernetes.io/router.priority: "10"
 spec:
   ingressClassName: traefik
   rules:
