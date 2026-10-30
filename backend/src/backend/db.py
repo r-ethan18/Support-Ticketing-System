@@ -36,10 +36,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await init_schema(pool)
         await ensure_admin(pool)
         app.state.db_pool = pool
+        app.state.pub_sub = get_hub_instance()
         with serve_metrics(pool):
             yield
-        app.state.pub_sub = get_hub_instance()
-        yield
     finally:
         await pool.close()
 
