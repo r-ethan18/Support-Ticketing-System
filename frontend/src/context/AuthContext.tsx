@@ -22,6 +22,12 @@ interface AuthContextType {
 	loading: boolean;
 	mockMode: boolean;
 	login: (email: string, pass: string) => Promise<Person>;
+	register: (details: {
+		name: string;
+		email: string;
+		phone: string;
+		password: string;
+	}) => Promise<Person>;
 	logout: () => void;
 	switchRole: (role: Role) => void;
 	toggleMockMode: (enabled: boolean) => void;
@@ -73,6 +79,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		return result.person;
 	}, []);
 
+	const register = useCallback(
+		async (details: {
+			name: string;
+			email: string;
+			phone: string;
+			password: string;
+		}) => {
+			const result = await authService.register(details);
+			setUser(result.person);
+			return result.person;
+		},
+		[],
+	);
+
 	const logout = useCallback(() => {
 		authService.logout();
 		setUser(null);
@@ -111,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				loading,
 				mockMode,
 				login,
+				register,
 				logout,
 				switchRole,
 				toggleMockMode,

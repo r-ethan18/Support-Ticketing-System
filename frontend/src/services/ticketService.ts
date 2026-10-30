@@ -584,6 +584,60 @@ export const ticketService = {
 		return people;
 	},
 
+	/** Public sign-up; always creates a requester. */
+	async registerPerson(body: {
+		name: string;
+		email: string;
+		phone: string;
+		password: string;
+	}): Promise<Person> {
+		if (!isMockMode()) {
+			return await apiRequest<Person>("/auth/register", {
+				method: "POST",
+				body: JSON.stringify(body),
+				skipAuthRefresh: true,
+			});
+		}
+		const people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		if (
+			people.some((p) => p.email.toLowerCase() === body.email.toLowerCase())
+		) {
+			throw new Error("An account with this email already exists.");
+		}
+		const person: Person = {
+			id: `p-${Date.now()}`,
+			name: body.name,
+			email: body.email,
+			phone: body.phone,
+			role: "requester",
+		};
+		setStore(KEYS.PEOPLE, [person, ...people]);
+		return person;
+	},
+
+	/** Admin-only: set an existing person's role (never `admin`). */
+	async assignRole(
+		personId: string,
+		assignment: {
+			role: Exclude<Role, "admin">;
+			departmentId: string | null;
+			vendorId: string | null;
+		},
+	): Promise<Person> {
+		if (!isMockMode()) {
+			return await apiRequest<Person>(`/people/${personId}/role`, {
+				method: "PUT",
+				body: JSON.stringify(assignment),
+			});
+		}
+		const people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
+		const found = people.find((p) => p.id === personId);
+		if (!found) throw new Error("Person not found");
+		Object.assign(found, assignment);
+		setStore(KEYS.PEOPLE, people);
+		return found;
+	},
+
 	async getPerson(personId: string): Promise<Person> {
 		if (!isMockMode()) {
 			return await apiRequest<Person>(`/people/${personId}`);
