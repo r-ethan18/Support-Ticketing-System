@@ -6,7 +6,9 @@ import {
 	LifeBuoy,
 	Lock,
 	Mail,
+	Phone,
 	ShieldCheck,
+	User,
 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -15,27 +17,56 @@ import { Input } from "../../components/common/Input";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { DEMO_CREDENTIALS } from "../../services/authService";
-import type { Role } from "../../types/api";
+import type { Person, Role } from "../../types/api";
 
 export function LoginPage() {
-	const { login, switchRole, mockMode, toggleMockMode } = useAuth();
+	const { login, register, switchRole, mockMode, toggleMockMode } = useAuth();
 	const { showToast } = useToast();
 	const navigate = useNavigate();
 
+	const [mode, setMode] = useState<"signin" | "signup">("signin");
+	const [name, setName] = useState("");
+	const [phone, setPhone] = useState("");
 	const [email, setEmail] = useState("requester@example.com");
 	const [password, setPassword] = useState("requesterpassword123");
 	const [showPassword, setShowPassword] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	const handleLogin = async (e: FormEvent) => {
+	const switchMode = (next: "signin" | "signup") => {
+		setMode(next);
+		setError(null);
+		if (next === "signup") {
+			setEmail("");
+			setPassword("");
+		}
+	};
+
+	const handleSubmit = async (e: FormEvent) => {
 		e.preventDefault();
 		setError(null);
+
+		if (mode === "signup" && password.length < 12) {
+			setError("Password must be at least 12 characters.");
+			return;
+		}
+
 		setLoading(true);
 
 		try {
-			const person = await login(email, password);
-			showToast(`Authenticated as ${person.name}. Welcome back!`, "success");
+			let person: Person;
+			if (mode === "signup") {
+				person = await register({
+					name: name.trim(),
+					email: email.trim(),
+					phone: phone.trim(),
+					password,
+				});
+				showToast(`Account created. Welcome, ${person.name}!`, "success");
+			} else {
+				person = await login(email, password);
+				showToast(`Authenticated as ${person.name}. Welcome back!`, "success");
+			}
 
 			// Route based on actual role
 			if (person.role === "admin") {
@@ -84,46 +115,48 @@ export function LoginPage() {
 				</div>
 
 				{/* Quick Fill Demo Accounts */}
-				<div className="demo-accounts-panel">
-					<div className="demo-panel-header">
-						<ShieldCheck size={14} className="text-primary" />
-						<span>1-CLICK DEMO PERSONAS</span>
+				{mode === "signin" && (
+					<div className="demo-accounts-panel">
+						<div className="demo-panel-header">
+							<ShieldCheck size={14} className="text-primary" />
+							<span>1-CLICK DEMO PERSONAS</span>
+						</div>
+						<div className="demo-persona-grid">
+							<button
+								type="button"
+								className={`demo-persona-btn ${email.includes("requester") ? "selected" : ""}`}
+								onClick={() => quickFillPersona("requester")}
+							>
+								<span className="persona-role">Requester</span>
+								<span className="persona-name">Alice Chen</span>
+							</button>
+							<button
+								type="button"
+								className={`demo-persona-btn ${email.includes("assignee") ? "selected" : ""}`}
+								onClick={() => quickFillPersona("assignee")}
+							>
+								<span className="persona-role">Assignee</span>
+								<span className="persona-name">Carlos Mendoza</span>
+							</button>
+							<button
+								type="button"
+								className={`demo-persona-btn ${email.includes("supervisor") ? "selected" : ""}`}
+								onClick={() => quickFillPersona("supervisor")}
+							>
+								<span className="persona-role">Supervisor</span>
+								<span className="persona-name">David Miller</span>
+							</button>
+							<button
+								type="button"
+								className={`demo-persona-btn ${email.includes("admin") ? "selected" : ""}`}
+								onClick={() => quickFillPersona("admin")}
+							>
+								<span className="persona-role">Administrator</span>
+								<span className="persona-name">Administrator</span>
+							</button>
+						</div>
 					</div>
-					<div className="demo-persona-grid">
-						<button
-							type="button"
-							className={`demo-persona-btn ${email.includes("requester") ? "selected" : ""}`}
-							onClick={() => quickFillPersona("requester")}
-						>
-							<span className="persona-role">Requester</span>
-							<span className="persona-name">Alice Chen</span>
-						</button>
-						<button
-							type="button"
-							className={`demo-persona-btn ${email.includes("assignee") ? "selected" : ""}`}
-							onClick={() => quickFillPersona("assignee")}
-						>
-							<span className="persona-role">Assignee</span>
-							<span className="persona-name">Carlos Mendoza</span>
-						</button>
-						<button
-							type="button"
-							className={`demo-persona-btn ${email.includes("supervisor") ? "selected" : ""}`}
-							onClick={() => quickFillPersona("supervisor")}
-						>
-							<span className="persona-role">Supervisor</span>
-							<span className="persona-name">David Miller</span>
-						</button>
-						<button
-							type="button"
-							className={`demo-persona-btn ${email.includes("admin") ? "selected" : ""}`}
-							onClick={() => quickFillPersona("admin")}
-						>
-							<span className="persona-role">Administrator</span>
-							<span className="persona-name">Administrator</span>
-						</button>
-					</div>
-				</div>
+				)}
 
 				{error && (
 					<div className="login-error-alert" role="alert">
@@ -132,7 +165,33 @@ export function LoginPage() {
 					</div>
 				)}
 
-				<form onSubmit={handleLogin} className="login-form">
+				<form onSubmit={handleSubmit} className="login-form">
+					{mode === "signup" && (
+						<>
+							<Input
+								id="signup-name"
+								name="name"
+								label="Full Name"
+								placeholder="Jane Doe"
+								value={name}
+								onChange={(e) => setName(e.target.value)}
+								required
+								leftIcon={<User size={16} />}
+							/>
+							<Input
+								id="signup-phone"
+								name="phone"
+								type="tel"
+								label="Phone Number"
+								placeholder="+1-555-0100"
+								value={phone}
+								onChange={(e) => setPhone(e.target.value)}
+								required
+								leftIcon={<Phone size={16} />}
+							/>
+						</>
+					)}
+
 					<Input
 						id="login-email"
 						name="email"
@@ -151,6 +210,7 @@ export function LoginPage() {
 						type={showPassword ? "text" : "password"}
 						label="Password"
 						placeholder="••••••••••••"
+						minLength={mode === "signup" ? 12 : undefined}
 						value={password}
 						onChange={(e) => setPassword(e.target.value)}
 						required
@@ -187,8 +247,34 @@ export function LoginPage() {
 						isLoading={loading}
 						className="w-full mt-2"
 					>
-						Sign In to Console
+						{mode === "signup" ? "Create Account" : "Sign In to Console"}
 					</Button>
+
+					<p className="text-sm text-center mt-2">
+						{mode === "signup" ? (
+							<>
+								Already have an account?{" "}
+								<button
+									type="button"
+									className="link-button"
+									onClick={() => switchMode("signin")}
+								>
+									Sign in
+								</button>
+							</>
+						) : (
+							<>
+								New here?{" "}
+								<button
+									type="button"
+									className="link-button"
+									onClick={() => switchMode("signup")}
+								>
+									Create an account
+								</button>
+							</>
+						)}
+					</p>
 				</form>
 
 				<div className="login-footer">

@@ -2160,6 +2160,16 @@ body {
 	color: var(--text-secondary);
 }
 
+.link-button {
+	background: none;
+	border: none;
+	padding: 0;
+	color: var(--primary, #2563eb);
+	font: inherit;
+	cursor: pointer;
+	text-decoration: underline;
+}
+
 .login-footer {
 	text-align: center;
 	padding-top: 8px;
