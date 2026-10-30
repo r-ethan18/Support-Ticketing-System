@@ -16,7 +16,7 @@ import type {
 	TicketUpdate,
 	Vendor,
 } from "../types/api";
-import { apiRequest } from "./apiClient";
+import { ApiError, apiRequest } from "./apiClient";
 import {
 	INITIAL_ASSETS,
 	INITIAL_ASSIGNMENTS,
@@ -219,13 +219,9 @@ export const ticketService = {
 		return found;
 	},
 
-	async createTicket(
-		body: TicketCreate,
-		requesterId: string,
-		assetId?: string,
-	): Promise<Ticket> {
+	async createTicket(body: TicketCreate, requesterId: string): Promise<Ticket> {
 		if (!isMockMode()) {
-			// Backend TicketCreate takes title, description, location, priority
+			// Requesters can't pick an asset; a supervisor sets it during triage.
 			return await apiRequest<Ticket>("/tickets", {
 				method: "POST",
 				body: JSON.stringify({
@@ -250,7 +246,7 @@ export const ticketService = {
 			status: "open",
 			createdAt: now,
 			requesterId,
-			assetId: assetId || null,
+			assetId: null,
 		};
 
 		tickets.unshift(newTicket);
@@ -568,9 +564,10 @@ export const ticketService = {
 					params: filters,
 				});
 				return res.items;
-			} catch (_err) {
-				// Requesters are 403 on list_people per API spec; gracefully return empty
-				return [];
+			} catch (err) {
+				// Requesters are 403 on list_people per API spec
+				if (err instanceof ApiError && err.isForbidden) return [];
+				throw err;
 			}
 		}
 		let people = getStore<Person>(KEYS.PEOPLE, INITIAL_PEOPLE);
@@ -599,48 +596,32 @@ export const ticketService = {
 
 	async listDepartments(): Promise<Department[]> {
 		if (!isMockMode()) {
-			try {
-				const res = await apiRequest<PageResponse<Department>>("/departments");
-				return res.items;
-			} catch {
-				return INITIAL_DEPARTMENTS;
-			}
+			const res = await apiRequest<PageResponse<Department>>("/departments");
+			return res.items;
 		}
 		return INITIAL_DEPARTMENTS;
 	},
 
 	async listCategories(): Promise<Category[]> {
 		if (!isMockMode()) {
-			try {
-				const res = await apiRequest<PageResponse<Category>>("/categories");
-				return res.items;
-			} catch {
-				return INITIAL_CATEGORIES;
-			}
+			const res = await apiRequest<PageResponse<Category>>("/categories");
+			return res.items;
 		}
 		return INITIAL_CATEGORIES;
 	},
 
 	async listVendors(): Promise<Vendor[]> {
 		if (!isMockMode()) {
-			try {
-				const res = await apiRequest<PageResponse<Vendor>>("/vendors");
-				return res.items;
-			} catch {
-				return INITIAL_VENDORS;
-			}
+			const res = await apiRequest<PageResponse<Vendor>>("/vendors");
+			return res.items;
 		}
 		return INITIAL_VENDORS;
 	},
 
 	async listAssets(): Promise<Asset[]> {
 		if (!isMockMode()) {
-			try {
-				const res = await apiRequest<PageResponse<Asset>>("/assets");
-				return res.items;
-			} catch {
-				return INITIAL_ASSETS;
-			}
+			const res = await apiRequest<PageResponse<Asset>>("/assets");
+			return res.items;
 		}
 		return INITIAL_ASSETS;
 	},

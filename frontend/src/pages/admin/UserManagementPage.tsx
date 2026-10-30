@@ -10,8 +10,20 @@ import { Select } from "../../components/common/Select";
 import { TableSkeleton } from "../../components/common/Skeleton";
 import { useToast } from "../../context/ToastContext";
 import { apiRequest } from "../../services/apiClient";
-import { ticketService } from "../../services/ticketService";
+import { isMockMode, ticketService } from "../../services/ticketService";
 import type { Department, Person, Role, Vendor } from "../../types/api";
+
+const PASSWORD_ALPHABET =
+	"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+
+/** A random one-time password for a new account (about 93 bits). */
+function generatePassword(length = 16): string {
+	const bytes = crypto.getRandomValues(new Uint32Array(length));
+	return Array.from(
+		bytes,
+		(b) => PASSWORD_ALPHABET[b % PASSWORD_ALPHABET.length],
+	).join("");
+}
 
 export function UserManagementPage() {
 	const { showToast } = useToast();
@@ -33,6 +45,11 @@ export function UserManagementPage() {
 	const [newDeptId, setNewDeptId] = useState("");
 	const [newVendorId, setNewVendorId] = useState("");
 	const [creatingUser, setCreatingUser] = useState(false);
+	// Shown once after a live account is created; the server never reveals it again.
+	const [createdCredentials, setCreatedCredentials] = useState<{
+		email: string;
+		password: string;
+	} | null>(null);
 
 	useEffect(() => {
 		async function loadData() {
@@ -62,21 +79,18 @@ export function UserManagementPage() {
 
 		setCreatingUser(true);
 		try {
-			if (
-				ticketService.listPeople &&
-				localStorage.getItem("sts_use_mock_mode") !== "true"
-			) {
-				const tempPassword = "TempPassword123!";
+			if (!isMockMode()) {
+				const password = generatePassword();
+				const phone = newPhone.trim() || "+1-555-0000";
+				const email = newEmail.trim();
 				if (newRole === "admin") {
-					await ticketService.listPeople(); // verification
-					// Admin creation via POST /admins
 					await apiRequest("/admins", {
 						method: "POST",
 						body: JSON.stringify({
 							name: newName.trim(),
-							email: newEmail.trim(),
-							phone: newPhone.trim() || "+1-555-0000",
-							password: tempPassword,
+							email,
+							phone,
+							password,
 						}),
 					});
 				} else {
@@ -84,32 +98,40 @@ export function UserManagementPage() {
 						method: "POST",
 						body: JSON.stringify({
 							name: newName.trim(),
-							email: newEmail.trim(),
-							phone: newPhone.trim() || "+1-555-0000",
-							password: tempPassword,
+							email,
+							phone,
+							password,
 						}),
 					});
 
 					if (newRole !== "requester") {
-						await apiRequest(`/people/${reg.id}/role`, {
-							method: "PUT",
-							body: JSON.stringify({
-								role: newRole,
-								departmentId:
-									newRole === "supervisor"
-										? newDeptId || departments[0]?.id || null
-										: null,
-								vendorId:
-									newRole === "assignee"
-										? newVendorId || vendors[0]?.id || null
-										: null,
-							}),
-						});
+						try {
+							await apiRequest(`/people/${reg.id}/role`, {
+								method: "PUT",
+								body: JSON.stringify({
+									role: newRole,
+									departmentId:
+										newRole === "supervisor"
+											? newDeptId || departments[0]?.id || null
+											: null,
+									vendorId:
+										newRole === "assignee"
+											? newVendorId || vendors[0]?.id || null
+											: null,
+								}),
+							});
+						} catch (err) {
+							// Don't leave a half-provisioned requester behind.
+							await apiRequest(`/people/${reg.id}`, {
+								method: "DELETE",
+							}).catch(() => {});
+							throw err;
+						}
 					}
 				}
 
-				const refreshed = await ticketService.listPeople();
-				setPeople(refreshed);
+				setPeople(await ticketService.listPeople());
+				setCreatedCredentials({ email, password });
 			} else {
 				const newPerson: Person = {
 					id: `p-${Date.now()}`,
@@ -121,9 +143,9 @@ export function UserManagementPage() {
 					vendorId: newVendorId || null,
 				};
 				setPeople((prev) => [newPerson, ...prev]);
+				setAddUserModalOpen(false);
 			}
 
-			setAddUserModalOpen(false);
 			setNewName("");
 			setNewEmail("");
 			setNewPhone("");
@@ -136,6 +158,11 @@ export function UserManagementPage() {
 		} finally {
 			setCreatingUser(false);
 		}
+	};
+
+	const closeAddUserModal = () => {
+		setAddUserModalOpen(false);
+		setCreatedCredentials(null);
 	};
 
 	const filteredPeople = people.filter((p) => {
@@ -291,100 +318,127 @@ export function UserManagementPage() {
 			{/* Add User Modal */}
 			<Modal
 				isOpen={addUserModalOpen}
-				onClose={() => setAddUserModalOpen(false)}
+				onClose={closeAddUserModal}
 				title="Register Enterprise User"
 				description="Provision a new account with appropriate workspace access rights."
 				footer={
-					<div className="flex gap-2 justify-end w-full">
-						<Button
-							variant="secondary"
-							onClick={() => setAddUserModalOpen(false)}
-						>
-							Cancel
-						</Button>
-						<Button
-							variant="primary"
-							isLoading={creatingUser}
-							onClick={handleAddUser}
-						>
-							Create Account
-						</Button>
-					</div>
+					createdCredentials ? (
+						<div className="flex gap-2 justify-end w-full">
+							<Button variant="primary" onClick={closeAddUserModal}>
+								Done
+							</Button>
+						</div>
+					) : (
+						<div className="flex gap-2 justify-end w-full">
+							<Button variant="secondary" onClick={closeAddUserModal}>
+								Cancel
+							</Button>
+							<Button
+								variant="primary"
+								isLoading={creatingUser}
+								onClick={handleAddUser}
+							>
+								Create Account
+							</Button>
+						</div>
+					)
 				}
 			>
-				<form onSubmit={handleAddUser} className="flex flex-col gap-4">
-					<Input
-						id="new-user-name"
-						label="Full Name"
-						placeholder="e.g. David Miller"
-						value={newName}
-						onChange={(e) => setNewName(e.target.value)}
-						required
-					/>
-
-					<Input
-						id="new-user-email"
-						label="Email Address"
-						type="email"
-						placeholder="d.miller@example.com"
-						value={newEmail}
-						onChange={(e) => setNewEmail(e.target.value)}
-						required
-					/>
-
-					<Input
-						id="new-user-phone"
-						label="Phone Number"
-						placeholder="+1 (555) 234-5678"
-						value={newPhone}
-						onChange={(e) => setNewPhone(e.target.value)}
-					/>
-
-					<Select
-						id="new-user-role"
-						label="System Role"
-						value={newRole}
-						onChange={(e) => setNewRole(e.target.value as Role)}
-						required
-					>
-						<option value="requester">Requester (Standard Employee)</option>
-						<option value="assignee">Assignee (Field Technician)</option>
-						<option value="supervisor">Supervisor (Department Head)</option>
-						<option value="admin">Administrator (System Admin)</option>
-					</Select>
-
-					{newRole === "supervisor" && (
-						<Select
-							id="new-user-dept"
-							label="Assign Department"
-							value={newDeptId}
-							onChange={(e) => setNewDeptId(e.target.value)}
+				{createdCredentials ? (
+					<div className="flex flex-col gap-3">
+						<p className="text-sm">
+							Account created. Share these sign-in details with the user
+							securely; the password is shown only once.
+						</p>
+						<code className="text-sm">{createdCredentials.email}</code>
+						<code className="text-sm">{createdCredentials.password}</code>
+						<Button
+							variant="secondary"
+							onClick={() =>
+								navigator.clipboard
+									?.writeText(createdCredentials.password)
+									.then(() => showToast("Password copied", "success"))
+									.catch(() => showToast("Could not copy password", "error"))
+							}
 						>
-							<option value="">-- Choose department --</option>
-							{departments.map((d) => (
-								<option key={d.id} value={d.id}>
-									{d.name}
-								</option>
-							))}
-						</Select>
-					)}
+							Copy Password
+						</Button>
+					</div>
+				) : (
+					<form onSubmit={handleAddUser} className="flex flex-col gap-4">
+						<Input
+							id="new-user-name"
+							label="Full Name"
+							placeholder="e.g. David Miller"
+							value={newName}
+							onChange={(e) => setNewName(e.target.value)}
+							required
+						/>
 
-					{newRole === "assignee" && (
+						<Input
+							id="new-user-email"
+							label="Email Address"
+							type="email"
+							placeholder="d.miller@example.com"
+							value={newEmail}
+							onChange={(e) => setNewEmail(e.target.value)}
+							required
+						/>
+
+						<Input
+							id="new-user-phone"
+							label="Phone Number"
+							placeholder="+1 (555) 234-5678"
+							value={newPhone}
+							onChange={(e) => setNewPhone(e.target.value)}
+						/>
+
 						<Select
-							id="new-user-vendor"
-							label="Assign Vendor Affiliation"
-							value={newVendorId}
-							onChange={(e) => setNewVendorId(e.target.value)}
+							id="new-user-role"
+							label="System Role"
+							value={newRole}
+							onChange={(e) => setNewRole(e.target.value as Role)}
+							required
 						>
-							<option value="">-- In-house or select vendor --</option>
-							{vendors.map((v) => (
-								<option key={v.id} value={v.id}>
-									{v.name}
-								</option>
-							))}
+							<option value="requester">Requester (Standard Employee)</option>
+							<option value="assignee">Assignee (Field Technician)</option>
+							<option value="supervisor">Supervisor (Department Head)</option>
+							<option value="admin">Administrator (System Admin)</option>
 						</Select>
-					)}
-				</form>
+
+						{newRole === "supervisor" && (
+							<Select
+								id="new-user-dept"
+								label="Assign Department"
+								value={newDeptId}
+								onChange={(e) => setNewDeptId(e.target.value)}
+							>
+								<option value="">-- Choose department --</option>
+								{departments.map((d) => (
+									<option key={d.id} value={d.id}>
+										{d.name}
+									</option>
+								))}
+							</Select>
+						)}
+
+						{newRole === "assignee" && (
+							<Select
+								id="new-user-vendor"
+								label="Assign Vendor Affiliation"
+								value={newVendorId}
+								onChange={(e) => setNewVendorId(e.target.value)}
+							>
+								<option value="">-- In-house or select vendor --</option>
+								{vendors.map((v) => (
+									<option key={v.id} value={v.id}>
+										{v.name}
+									</option>
+								))}
+							</Select>
+						)}
+					</form>
+				)}
 			</Modal>
 		</div>
 	);
