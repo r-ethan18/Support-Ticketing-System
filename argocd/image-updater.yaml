@@ -1,0 +1,41 @@
+---
+# Argo CD Image Updater: roll out the newest images CI has pushed to GHCR.
+#
+# CI only builds and pushes images (tags `sha-<7 chars>` and `latest`). This
+# resource makes Image Updater, running next to Argo CD, poll GHCR and set the
+# newest `sha-*` tag on the Application, so nothing is written back to git and
+# the cluster never has to be reachable from CI.
+#
+# Prerequisites: Argo CD and Image Updater are installed in the `argocd`
+# namespace and the Application in application.yaml exists (see k8s/README.md).
+#
+# Apply with:
+#   kubectl apply -f argocd/image-updater.yaml
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: support-ticketing-system
+  namespace: argocd           # must be the Application's namespace
+spec:
+  applicationRefs:
+    - namePattern: support-ticketing-system
+      # Sets the kustomize image on the Application resource (the default).
+      writeBackConfig:
+        method: argocd
+      images:
+        - alias: backend
+          imageName: ghcr.io/r-ethan18/support-ticketing-system-backend:latest
+          commonUpdateSettings:
+            # The tag with the most recent build date, among the immutable
+            # `sha-` tags only (never `latest`).
+            updateStrategy: newest-build
+            allowTags: regexp:^sha-[0-9a-f]{7}$
+            # Only needed while the GHCR packages are private: a Docker pull
+            # secret in the argocd namespace with read:packages access.
+            # pullSecret: pullsecret:argocd/ghcr-creds
+        - alias: frontend
+          imageName: ghcr.io/r-ethan18/support-ticketing-system-frontend:latest
+          commonUpdateSettings:
+            updateStrategy: newest-build
+            allowTags: regexp:^sha-[0-9a-f]{7}$
+            # pullSecret: pullsecret:argocd/ghcr-creds
