@@ -1,6 +1,6 @@
 services:
   traefik:
-    image: traefik:v3.6    
+    image: traefik:v3.6
     container_name: sts-traefik
     restart: unless-stopped
     ports:
@@ -24,7 +24,7 @@ services:
       - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET (>= 32 chars) in .env}
       - ADMIN_EMAIL=${ADMIN_EMAIL:?set ADMIN_EMAIL (first admin) in .env}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:?set ADMIN_PASSWORD (first admin, >= 12 chars) in .env}
-      - DB_HOST=db
+      - DB_HOST=sts-db
       - DB_PORT=5432
       - DB_NAME=${POSTGRES_DB:-sts}
       - DB_USER=${POSTGRES_USER:-sts}
@@ -65,6 +65,7 @@ services:
 
   db:
     image: postgres:17
+    container_name: sts-db
     restart: unless-stopped
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-sts}
@@ -73,18 +74,20 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      test: [ "CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"" ]
       interval: 5s
       timeout: 5s
       retries: 5
     ports:
       - "5433:5432"
     networks:
-      - sts-network
-
+      sts-network:
+        aliases:
+          - db
 
 networks:
   sts-network:
+    name: sts-network
     driver: bridge
 
 volumes:
