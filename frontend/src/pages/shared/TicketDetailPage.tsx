@@ -38,6 +38,7 @@ import type {
 	TicketComment,
 	TicketStatus,
 	TicketStatusHistoryEntry,
+	Vendor,
 } from "../../types/api";
 
 export function TicketDetailPage() {
@@ -65,6 +66,16 @@ export function TicketDetailPage() {
 	const [assignModalOpen, setAssignModalOpen] = useState(false);
 	const [selectedAssigneeId, setSelectedAssigneeId] = useState("");
 	const [assigning, setAssigning] = useState(false);
+	const [unassigningId, setUnassigningId] = useState<string | null>(null);
+
+	// Vendors responsible for the ticket's asset; only their technicians can be assigned.
+	const [assetVendors, setAssetVendors] = useState<Vendor[]>([]);
+	const [assetChoice, setAssetChoice] = useState("");
+	const [savingAsset, setSavingAsset] = useState(false);
+
+	// Admin-only ticket deletion
+	const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+	const [deletingTicket, setDeletingTicket] = useState(false);
 
 	// Attachment modal
 	const [attachModalOpen, setAttachModalOpen] = useState(false);
@@ -181,6 +192,28 @@ export function TicketDetailPage() {
 		loadTicketData();
 	}, [id, showToast]);
 
+	const triageAssetId = ticket?.assetId ?? null;
+	const canTriage = role === "supervisor" || role === "admin";
+	useEffect(() => {
+		setAssetChoice(triageAssetId ?? "");
+		if (!triageAssetId || !canTriage) {
+			setAssetVendors([]);
+			return;
+		}
+		let cancelled = false;
+		ticketService
+			.listAssetVendors(triageAssetId)
+			.then((v) => {
+				if (!cancelled) setAssetVendors(v);
+			})
+			.catch(() => {
+				if (!cancelled) setAssetVendors([]);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [triageAssetId, canTriage]);
+
 	if (loading) {
 		return (
 			<div className="page-wrapper max-w-6xl">
@@ -222,12 +255,20 @@ export function TicketDetailPage() {
 
 	// Resolve relationships
 	const requester = people.find((p) => p.id === ticket.requesterId);
-	const activeAssignment = assignments.find((a) => !a.unassignedAt);
-	const currentAssignee = activeAssignment
-		? people.find((p) => p.id === activeAssignment.assigneeId)
-		: null;
 	const asset = assets.find((a) => a.id === ticket.assetId);
-	const assignableTechs = people.filter((p) => p.role === "assignee");
+	const activeAssignments = assignments.filter((a) => !a.unassignedAt);
+	const assignedIds = new Set(activeAssignments.map((a) => a.assigneeId));
+	// With an asset set, the backend only accepts technicians of its responsible vendors.
+	const assignableTechs = people.filter(
+		(p) =>
+			p.role === "assignee" &&
+			!assignedIds.has(p.id) &&
+			(!ticket.assetId || assetVendors.some((v) => v.id === p.vendorId)),
+	);
+	const triageAssets =
+		role === "supervisor"
+			? assets.filter((a) => a.departmentId === user?.departmentId)
+			: assets;
 
 	const handlePostComment = async (e: FormEvent) => {
 		e.preventDefault();
@@ -291,8 +332,9 @@ export function TicketDetailPage() {
 			);
 			setAssignments((prev) => [...prev, newAsg]);
 			setTicket((prev) =>
-				prev ? { ...prev, status: "assigned", supervisorId: user?.id } : prev,
+				prev && prev.status === "open" ? { ...prev, status: "assigned" } : prev,
 			);
+			setSelectedAssigneeId("");
 			setAssignModalOpen(false);
 			showToast("Technician assigned to ticket", "success");
 		} catch (_err) {
@@ -302,6 +344,69 @@ export function TicketDetailPage() {
 			);
 		} finally {
 			setAssigning(false);
+		}
+	};
+
+	const handleUnassign = async (assignmentId: string) => {
+		try {
+			setUnassigningId(assignmentId);
+			await ticketService.deleteAssignment(ticket.id, assignmentId);
+			const remaining = activeAssignments.filter((a) => a.id !== assignmentId);
+			setAssignments((prev) =>
+				prev.map((a) =>
+					a.id === assignmentId
+						? { ...a, unassignedAt: new Date().toISOString() }
+						: a,
+				),
+			);
+			// Removing the last assignee sends an `assigned` ticket back to `open`.
+			if (remaining.length === 0 && ticket.status === "assigned") {
+				setTicket({ ...ticket, status: "open" });
+			}
+			showToast("Technician removed from ticket", "success");
+		} catch (err) {
+			showToast(
+				err instanceof Error ? err.message : "Failed to unassign",
+				"error",
+			);
+		} finally {
+			setUnassigningId(null);
+		}
+	};
+
+	const handleSaveAsset = async () => {
+		if (!assetChoice || assetChoice === ticket.assetId) return;
+		try {
+			setSavingAsset(true);
+			const updated = await ticketService.updateTicket(
+				ticket.id,
+				{ assetId: assetChoice },
+				user?.id || "p-sup-1",
+			);
+			setTicket(updated);
+			showToast("Asset linked to ticket", "success");
+		} catch (err) {
+			showToast(
+				err instanceof Error ? err.message : "Failed to set asset",
+				"error",
+			);
+		} finally {
+			setSavingAsset(false);
+		}
+	};
+
+	const handleDeleteTicket = async () => {
+		try {
+			setDeletingTicket(true);
+			await ticketService.deleteTicket(ticket.id);
+			showToast("Ticket deleted", "success");
+			navigate(backUrl);
+		} catch (err) {
+			showToast(
+				err instanceof Error ? err.message : "Failed to delete ticket",
+				"error",
+			);
+			setDeletingTicket(false);
 		}
 	};
 
@@ -742,27 +847,52 @@ export function TicketDetailPage() {
 					{/* Assignment Card */}
 					<div className="card control-card mb-4">
 						<div className="card-section-header">
-							<h3 className="card-section-title">Assigned Field Tech</h3>
-							{(role === "supervisor" || role === "admin") && (
+							<h3 className="card-section-title">Assigned Field Techs</h3>
+							{canTriage && (
 								<Button
 									variant="ghost"
 									size="sm"
 									icon={<UserPlus size={14} />}
 									onClick={() => setAssignModalOpen(true)}
 								>
-									{currentAssignee ? "Reassign" : "Assign"}
+									{activeAssignments.length > 0 ? "Add Another" : "Assign"}
 								</Button>
 							)}
 						</div>
 
-						{currentAssignee ? (
-							<div className="assigned-person-box">
-								<Avatar name={currentAssignee.name} size="md" />
-								<div className="person-details">
-									<span className="person-name">{currentAssignee.name}</span>
-									<span className="person-email">{currentAssignee.email}</span>
-									<span className="person-phone">{currentAssignee.phone}</span>
-								</div>
+						{activeAssignments.length > 0 ? (
+							<div className="flex flex-col gap-3">
+								{activeAssignments.map((assignment) => {
+									const tech = people.find(
+										(p) => p.id === assignment.assigneeId,
+									);
+									return (
+										<div key={assignment.id} className="assigned-person-box">
+											<Avatar name={tech?.name ?? "Deleted user"} size="md" />
+											<div className="person-details">
+												<span className="person-name">
+													{tech?.name ?? "Deleted user"}
+												</span>
+												{tech && (
+													<>
+														<span className="person-email">{tech.email}</span>
+														<span className="person-phone">{tech.phone}</span>
+													</>
+												)}
+											</div>
+											{canTriage && (
+												<Button
+													variant="ghost"
+													size="sm"
+													isLoading={unassigningId === assignment.id}
+													onClick={() => handleUnassign(assignment.id)}
+												>
+													Unassign
+												</Button>
+											)}
+										</div>
+									);
+								})}
 							</div>
 						) : (
 							<div className="unassigned-notice">
@@ -794,19 +924,67 @@ export function TicketDetailPage() {
 					</div>
 
 					{/* Equipment / Asset Context */}
-					{asset && (
+					{(asset || canTriage) && (
 						<div className="card control-card">
 							<h3 className="card-section-title">Equipment Asset</h3>
-							<div className="asset-details-list">
-								<div className="asset-info-item">
-									<span className="asset-label">Asset:</span>
-									<span className="asset-val">{asset.name}</span>
+							{asset && (
+								<div className="asset-details-list">
+									<div className="asset-info-item">
+										<span className="asset-label">Asset:</span>
+										<span className="asset-val">{asset.name}</span>
+									</div>
+									{asset.location && (
+										<div className="asset-info-item">
+											<span className="asset-label">Location:</span>
+											<span className="asset-val">{asset.location}</span>
+										</div>
+									)}
 								</div>
-								<div className="asset-info-item">
-									<span className="asset-label">Location:</span>
-									<span className="asset-val">{asset.location}</span>
+							)}
+							{canTriage && ticket.status !== "closed" && (
+								<div className="flex flex-col gap-2 mt-2">
+									<Select
+										id="ticket-asset-select"
+										label={asset ? "Change asset" : "Link an asset (triage)"}
+										value={assetChoice}
+										onChange={(e) => setAssetChoice(e.target.value)}
+										className="select-sm"
+									>
+										<option value="">-- Choose asset --</option>
+										{triageAssets.map((a) => (
+											<option key={a.id} value={a.id}>
+												{a.name}
+											</option>
+										))}
+									</Select>
+									<Button
+										variant="secondary"
+										size="sm"
+										isLoading={savingAsset}
+										disabled={!assetChoice || assetChoice === ticket.assetId}
+										onClick={handleSaveAsset}
+									>
+										Save Asset
+									</Button>
+									<p className="text-xs text-secondary">
+										Once an asset is set, only technicians of its responsible
+										vendors can be assigned.
+									</p>
 								</div>
-							</div>
+							)}
+						</div>
+					)}
+
+					{role === "admin" && (
+						<div className="card control-card mt-4">
+							<h3 className="card-section-title">Danger Zone</h3>
+							<Button
+								variant="danger"
+								className="w-full"
+								onClick={() => setDeleteModalOpen(true)}
+							>
+								Delete Ticket
+							</Button>
 						</div>
 					)}
 				</div>
@@ -851,7 +1029,41 @@ export function TicketDetailPage() {
 							</option>
 						))}
 					</Select>
+					{assignableTechs.length === 0 && (
+						<p className="text-xs text-secondary mt-2">
+							{ticket.assetId
+								? "No available technician works for a vendor responsible for this asset. Link a vendor to the asset, or move a technician to one."
+								: "Every technician is already on this ticket."}
+						</p>
+					)}
 				</form>
+			</Modal>
+
+			{/* Delete Ticket Modal */}
+			<Modal
+				isOpen={deleteModalOpen}
+				onClose={() => setDeleteModalOpen(false)}
+				title="Delete Ticket"
+				description={`Permanently delete "${ticket.title}" with its comments, attachments and history?`}
+				footer={
+					<div className="flex gap-2 justify-end w-full">
+						<Button
+							variant="secondary"
+							onClick={() => setDeleteModalOpen(false)}
+						>
+							Cancel
+						</Button>
+						<Button
+							variant="danger"
+							isLoading={deletingTicket}
+							onClick={handleDeleteTicket}
+						>
+							Delete Ticket
+						</Button>
+					</div>
+				}
+			>
+				<p className="text-sm text-secondary">This cannot be undone.</p>
 			</Modal>
 
 			{/* Add Attachment Modal */}
