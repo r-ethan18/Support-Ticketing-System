@@ -1,6 +1,8 @@
 # Once a pod is selected by an Ingress policy, everything not listed is denied,
 # so this also states who may reach the API port. Adjust the namespace labels
-# to where the ingress controller and Prometheus run.
+# to where the ingress controller and Prometheus run. The ingress controller is
+# allowed from `traefik` (Helm install) and `kube-system` (K3s ships Traefik
+# there).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -14,8 +16,12 @@ spec:
   ingress:
     - from:
         - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: traefik
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - traefik
+                  - kube-system
       ports:
         - port: 8000
     - from:
