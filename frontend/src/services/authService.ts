@@ -5,6 +5,7 @@ import {
 	getApiBaseUrl,
 	getStoredRefreshToken,
 	getStoredToken,
+	refreshSession,
 	removeStoredToken,
 	setStoredRefreshToken,
 	setStoredToken,
@@ -160,6 +161,25 @@ export const authService = {
 			}
 			// Otherwise (network error, 5xx) the session can't be verified, so don't
 			// treat it as signed in; the tokens stay, and a reload retries.
+			return null;
+		}
+	},
+
+	/**
+	 * Swap the token pair and re-read the profile so a role change made by an
+	 * admin shows up now, not when the access token expires. Resolves `null`
+	 * if nothing could be refreshed (offline, signed out, mock mode).
+	 */
+	async syncSession(): Promise<Person | null> {
+		if (isMockMode() || !getStoredToken()) return null;
+		if (!(await refreshSession())) return null;
+		try {
+			const person = await apiRequest<Person>("/auth/me", {
+				skipAuthRefresh: true,
+			});
+			localStorage.setItem(USER_SESSION_KEY, JSON.stringify(person));
+			return person;
+		} catch {
 			return null;
 		}
 	},
