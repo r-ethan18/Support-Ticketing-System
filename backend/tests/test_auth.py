@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.schemas.enums import Role
@@ -84,3 +85,52 @@ def test_admin_passes_every_role_gate(db_client: TestClient, seed: Seeder) -> No
         f"{TICKET}/assignments/00000000-0000-0000-0000-000000000002", headers=admin
     )
     assert assignment.status_code == unassign.status_code == 404
+
+
+def _login(client: TestClient, email: str, password: str) -> int:
+    return client.post(
+        "/api/v1/auth/token", json={"email": email, "password": password}
+    ).status_code
+
+
+def test_change_password(db_client: TestClient, seed: Seeder) -> None:
+    _, headers = login_as(db_client, seed, Role.requester)
+    email = db_client.get("/api/v1/auth/me", headers=headers).json()["email"]
+    new = "a brand new passphrase"
+
+    response = db_client.post(
+        "/api/v1/auth/password",
+        headers=headers,
+        json={"currentPassword": PASSWORD, "newPassword": new},
+    )
+    assert response.status_code == 204
+    assert _login(db_client, email, PASSWORD) == 401
+    assert _login(db_client, email, new) == 200
+
+
+@pytest.mark.parametrize(
+    ("current", "new"),
+    [
+        ("wrong password entirely", "a brand new passphrase"),  # wrong current
+        (PASSWORD, PASSWORD),  # unchanged
+        (PASSWORD, "short"),  # fails validation
+    ],
+)
+def test_change_password_rejections(
+    db_client: TestClient, seed: Seeder, current: str, new: str
+) -> None:
+    _, headers = login_as(db_client, seed, Role.requester)
+    response = db_client.post(
+        "/api/v1/auth/password",
+        headers=headers,
+        json={"currentPassword": current, "newPassword": new},
+    )
+    assert response.status_code in (400, 422)
+
+
+def test_change_password_requires_auth(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/auth/password",
+        json={"currentPassword": PASSWORD, "newPassword": "a brand new passphrase"},
+    )
+    assert response.status_code == 401

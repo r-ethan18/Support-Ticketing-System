@@ -30,10 +30,15 @@ class DatabaseSettings:
 class Settings:
     jwt_secret: str
     access_token_ttl_seconds: int = 3600
+    refresh_token_ttl_seconds: int = 30 * 24 * 3600
     database: DatabaseSettings = DatabaseSettings()
     # Only used to create the first admin when none exists.
     admin_email: str = ""
     admin_password: str = ""
+    # Failed logins before a lockout, and how long counting/locking lasts.
+    login_max_failures: int = 5
+    login_window_seconds: int = 900
+    login_lockout_seconds: int = 900
 
 
 @lru_cache
@@ -53,6 +58,9 @@ def get_settings() -> Settings:
         access_token_ttl_seconds=int(
             os.environ.get("ACCESS_TOKEN_TTL_SECONDS", "3600")
         ),
+        refresh_token_ttl_seconds=int(
+            os.environ.get("REFRESH_TOKEN_TTL_SECONDS", str(30 * 24 * 3600))
+        ),
         database=DatabaseSettings(
             host=os.environ.get("DB_HOST", "localhost"),
             port=int(os.environ.get("DB_PORT", "5432")),
@@ -62,4 +70,7 @@ def get_settings() -> Settings:
         ),
         admin_email=os.environ.get("ADMIN_EMAIL", ""),
         admin_password=os.environ.get("ADMIN_PASSWORD", ""),
+        login_max_failures=int(os.environ.get("LOGIN_MAX_FAILURES", "5")),
+        login_window_seconds=int(os.environ.get("LOGIN_WINDOW_SECONDS", "900")),
+        login_lockout_seconds=int(os.environ.get("LOGIN_LOCKOUT_SECONDS", "900")),
     )
