@@ -591,7 +591,8 @@ export function DirectoryPage() {
 				<div className="flex flex-col gap-4">
 					{linkedVendors.length === 0 ? (
 						<p className="text-sm text-secondary">
-							No vendor is linked, so any technician can be assigned.
+							No vendor is linked, so no technician can be assigned to tickets
+							for this asset until one is added.
 						</p>
 					) : (
 						<ul className="flex flex-col gap-2">
