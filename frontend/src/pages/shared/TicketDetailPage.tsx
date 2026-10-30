@@ -14,7 +14,13 @@ import {
 	UploadCloud,
 	UserPlus,
 } from "lucide-react";
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import {
+	type FormEvent,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Avatar } from "../../components/common/Avatar";
 import { PriorityBadge, StatusBadge } from "../../components/common/Badge";
@@ -191,6 +197,41 @@ export function TicketDetailPage() {
 
 		loadTicketData();
 	}, [id, showToast]);
+
+	// Requesters and assignees cannot list people, so look up everyone named on
+	// the ticket individually. Each id is tried once; the server decides who is
+	// visible, and deleted accounts simply stay unresolved.
+	const lookedUp = useRef(new Set<string>());
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reset when the ticket changes
+	useEffect(() => {
+		lookedUp.current = new Set();
+	}, [id]);
+	useEffect(() => {
+		if (!ticket) return;
+		const named = [
+			ticket.requesterId,
+			ticket.supervisorId,
+			...assignments.map((a) => a.assigneeId),
+			...comments.map((c) => c.authorId),
+			...attachments.map((a) => a.uploadedById),
+			...history.map((h) => h.changedById),
+		];
+		const missing = named.filter(
+			(pid): pid is string =>
+				!!pid &&
+				!lookedUp.current.has(pid) &&
+				!people.some((p) => p.id === pid),
+		);
+		if (missing.length === 0) return;
+		for (const pid of missing) lookedUp.current.add(pid);
+		ticketService.getPeopleByIds(missing).then((found) => {
+			if (found.length === 0) return;
+			setPeople((prev) => [
+				...prev,
+				...found.filter((f) => !prev.some((p) => p.id === f.id)),
+			]);
+		});
+	}, [ticket, assignments, comments, attachments, history, people]);
 
 	const triageAssetId = ticket?.assetId ?? null;
 	const canTriage = role === "supervisor" || role === "admin";

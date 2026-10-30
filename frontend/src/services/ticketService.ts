@@ -701,6 +701,19 @@ export const ticketService = {
 		return found;
 	},
 
+	/**
+	 * Look up the given people one by one. Unlike `listPeople`, this works for
+	 * requesters and assignees, who may read the staff on their tickets (and an
+	 * assignee the requester). Anyone the caller may not see, or who has been
+	 * deleted, is left out.
+	 */
+	async getPeopleByIds(ids: string[]): Promise<Person[]> {
+		const results = await Promise.allSettled(
+			[...new Set(ids)].map((id) => ticketService.getPerson(id)),
+		);
+		return results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+	},
+
 	async listDepartments(): Promise<Department[]> {
 		if (!isMockMode()) {
 			const res = await apiRequest<PageResponse<Department>>("/departments");
