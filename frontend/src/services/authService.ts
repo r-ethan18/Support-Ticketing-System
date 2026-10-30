@@ -10,7 +10,7 @@ import {
 	setStoredToken,
 } from "./apiClient";
 import { INITIAL_PEOPLE } from "./mockData";
-import { isMockMode } from "./ticketService";
+import { isMockMode, ticketService } from "./ticketService";
 
 export interface DemoCredential {
 	role: Role;
@@ -126,6 +126,17 @@ export const authService = {
 			}
 			throw err;
 		}
+	},
+
+	/** Create a requester account, then sign in with it. */
+	async register(details: {
+		name: string;
+		email: string;
+		phone: string;
+		password: string;
+	}): Promise<{ person: Person; token: string }> {
+		await ticketService.registerPerson(details);
+		return authService.login(details.email, details.password);
 	},
 
 	async restoreSession(): Promise<Person | null> {
