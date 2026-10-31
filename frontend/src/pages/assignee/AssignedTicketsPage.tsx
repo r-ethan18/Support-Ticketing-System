@@ -3,6 +3,7 @@ import {
 	CheckSquare,
 	Clock,
 	Layers,
+	Play,
 	Search,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -66,8 +67,8 @@ export function AssignedTicketsPage() {
 				<div>
 					<h2 className="page-title">Assigned Work Queue</h2>
 					<p className="page-description">
-						Manage active service dispatches assigned to you, report work in
-						progress, and submit completion proof.
+						Manage active service dispatches assigned to you, mark completed
+						tasks as resolved, and submit completion proof.
 					</p>
 				</div>
 			</div>
@@ -196,16 +197,32 @@ export function AssignedTicketsPage() {
 												</span>
 											</td>
 											<td className="text-right">
-												<Button
-													variant="ghost"
-													size="sm"
-													onClick={(e) => {
-														e.stopPropagation();
-														navigate(`/assignee/tickets/${t.id}`);
-													}}
-												>
-													Open Workspace
-												</Button>
+												{t.status === "assigned" || t.status === "open" ? (
+													<Button
+														variant="primary"
+														size="sm"
+														icon={<Play size={13} />}
+														onClick={(e) => {
+															e.stopPropagation();
+															navigate(
+																`/assignee/tickets/${t.id}?startWork=true`,
+															);
+														}}
+													>
+														Start Work
+													</Button>
+												) : (
+													<Button
+														variant="ghost"
+														size="sm"
+														onClick={(e) => {
+															e.stopPropagation();
+															navigate(`/assignee/tickets/${t.id}`);
+														}}
+													>
+														Open Workspace
+													</Button>
+												)}
 											</td>
 										</tr>
 									);
