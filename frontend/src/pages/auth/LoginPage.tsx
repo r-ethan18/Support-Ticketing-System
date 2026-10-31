@@ -48,6 +48,14 @@ export function LoginPage() {
 		setError(null);
 
 		if (mode === "signup") {
+			if (!name.trim()) {
+				setError("Full name is required.");
+				return;
+			}
+			if (!phone.trim()) {
+				setError("Phone number is required.");
+				return;
+			}
 			if (password.length < 12) {
 				setError("Password must be at least 12 characters.");
 				return;
@@ -66,7 +74,7 @@ export function LoginPage() {
 				person = await register({
 					name: name.trim(),
 					email: email.trim(),
-					phone: phone.trim() || "+1-555-0100",
+					phone: phone.trim(),
 					password,
 				});
 				showToast(
@@ -169,6 +177,7 @@ export function LoginPage() {
 								placeholder="+1 (555) 234-5678"
 								value={phone}
 								onChange={(e) => setPhone(e.target.value)}
+								required
 								leftIcon={<Phone size={16} />}
 							/>
 						</>
