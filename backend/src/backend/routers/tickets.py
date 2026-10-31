@@ -227,7 +227,18 @@ async def update_ticket(
     ticket = await get_visible_ticket(pool, ticket_id, user)
     changes = body.model_dump(exclude_none=True)
     if user.role is Role.assignee:
-        raise HTTPException(http.HTTP_403_FORBIDDEN, detail="Insufficient role")
+        status_change = changes.pop("status", None)
+        if set(changes) or status_change not in (
+            TicketStatus.in_progress,
+            TicketStatus.resolved,
+        ):
+            raise HTTPException(
+                http.HTTP_403_FORBIDDEN,
+                detail="Assignees may only update the ticket status to in_progress or resolved",
+            )
+        if ticket.status is TicketStatus.closed:
+            raise HTTPException(http.HTTP_409_CONFLICT, detail="Ticket is closed")
+        changes["status"] = status_change
     if user.role is Role.requester:
         status_change = changes.pop("status", None)
         if set(changes) - REQUESTER_EDITABLE or status_change not in (
@@ -745,7 +756,7 @@ async def create_ticket_comment(
 ) -> TicketComment:
     ticket = await get_visible_ticket(pool, ticket_id, user)
     if ticket.status is TicketStatus.closed and not body.body.strip().startswith(
-        "[Reopen"
+        ("[Reopen", "[Resolution")
     ):
         raise HTTPException(http.HTTP_409_CONFLICT, detail="Ticket is closed")
     async with (

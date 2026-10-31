@@ -1982,6 +1982,32 @@ body {
 	word-break: break-word;
 }
 
+/* Resolution Approval Cards */
+.resolution-approval-card {
+	background-color: var(--success-subtle, rgba(16, 185, 129, 0.08));
+	border: 1px solid var(--success, #10b981);
+	border-radius: var(--radius-md);
+	padding: 14px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.resolution-card-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 0.88rem;
+	font-weight: 700;
+	color: var(--success-text, #047857);
+}
+
+.resolution-card-body {
+	font-size: 0.82rem;
+	line-height: 1.5;
+	color: var(--text-secondary);
+}
+
 .reopen-actions-row {
 	display: flex;
 	flex-direction: column;

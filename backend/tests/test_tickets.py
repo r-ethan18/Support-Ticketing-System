@@ -254,7 +254,9 @@ def test_requester_cannot_touch_others_or_edit_after_assignment(
     assert db_client.patch(url, json={"title": "x"}, headers=owner).status_code == 409
 
 
-def test_assignee_cannot_update(db_client: TestClient, seed: Seeder) -> None:
+def test_assignee_can_mark_resolved_and_requester_can_close(
+    db_client: TestClient, seed: Seeder
+) -> None:
     _, owner = login_as(db_client, seed, Role.requester)
     assignee_id, assignee = login_as(db_client, seed, Role.assignee)
     ticket = make_ticket(db_client, owner, seed)
@@ -262,10 +264,30 @@ def test_assignee_cannot_update(db_client: TestClient, seed: Seeder) -> None:
         "INSERT INTO ticket_assignment (ticket_id, assignee_id) VALUES (%s, %s)",
         (ticket["id"], assignee_id),
     )
-    response = db_client.patch(
-        f"{API}/{ticket['id']}", json={"status": "resolved"}, headers=assignee
-    )
-    assert response.status_code == 403
+    url = f"{API}/{ticket['id']}"
+
+    # Assignee cannot edit ticket metadata (forbidden)
+    bad_edit = db_client.patch(url, json={"title": "Hacked"}, headers=assignee)
+    assert bad_edit.status_code == 403
+
+    # Assignee cannot directly close ticket (forbidden)
+    bad_close = db_client.patch(url, json={"status": "closed"}, headers=assignee)
+    assert bad_close.status_code == 403
+
+    # Assignee can mark ticket as resolved
+    resolved = db_client.patch(url, json={"status": "resolved"}, headers=assignee)
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "resolved"
+
+    # Once resolved, requestee (owner) can approve and close the ticket
+    closed = db_client.patch(url, json={"status": "closed"}, headers=owner)
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "closed"
+    assert closed.json()["closedAt"] is not None
+
+    # After closure, assignee cannot update
+    conflict = db_client.patch(url, json={"status": "resolved"}, headers=assignee)
+    assert conflict.status_code == 409
 
 
 def test_only_admin_deletes(db_client: TestClient, seed: Seeder) -> None:

@@ -9,6 +9,7 @@ import {
 	MapPin,
 	MessageSquare,
 	Paperclip,
+	Play,
 	RotateCcw,
 	Send,
 	ShieldAlert,
@@ -23,7 +24,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AttachmentPreview } from "../../components/common/AttachmentPreview";
 import { Avatar } from "../../components/common/Avatar";
 import { PriorityBadge, StatusBadge } from "../../components/common/Badge";
@@ -90,6 +91,7 @@ function clearStoredReopenRequest(ticketId: string): void {
 
 export function TicketDetailPage() {
 	const { id } = useParams<{ id: string }>();
+	const [searchParams] = useSearchParams();
 	const { user, role } = useAuth();
 	const { showToast } = useToast();
 	const navigate = useNavigate();
@@ -157,6 +159,16 @@ export function TicketDetailPage() {
 	const [reopeningTicket, setReopeningTicket] = useState(false);
 	const [submittingReopenRequest, setSubmittingReopenRequest] = useState(false);
 
+	// Mark as Resolved modal state
+	const [resolveModalOpen, setResolveModalOpen] = useState(false);
+	const [resolveNotes, setResolveNotes] = useState("");
+	const [markingResolved, setMarkingResolved] = useState(false);
+
+	// Start Work modal state
+	const [startWorkModalOpen, setStartWorkModalOpen] = useState(false);
+	const [startWorkDescription, setStartWorkDescription] = useState("");
+	const [startingWork, setStartingWork] = useState(false);
+
 	// Derive pending reopen request from comments (across devices/sessions) or local state
 	const pendingReopenFromComments = useMemo<ReopenRequest | null>(() => {
 		if (ticket?.status !== "closed") return null;
@@ -206,6 +218,15 @@ export function TicketDetailPage() {
 			setAssignments(await ticketService.listAssignments(id));
 		} catch (err) {
 			console.warn("Failed to refresh assignments", err);
+		}
+	}, [id]);
+
+	const reloadComments = useCallback(async () => {
+		if (!id) return;
+		try {
+			setComments(await ticketService.listComments(id));
+		} catch (err) {
+			console.warn("Failed to refresh comments", err);
 		}
 	}, [id]);
 
@@ -367,6 +388,16 @@ export function TicketDetailPage() {
 			cancelled = true;
 		};
 	}, [triageAssetId, canTriage]);
+
+	// Auto-open start work modal if directed from queue
+	useEffect(() => {
+		if (
+			searchParams.get("startWork") === "true" &&
+			(ticket?.status === "assigned" || ticket?.status === "open")
+		) {
+			setStartWorkModalOpen(true);
+		}
+	}, [searchParams, ticket?.status]);
 
 	if (loading) {
 		return (
@@ -635,6 +666,169 @@ export function TicketDetailPage() {
 			);
 		} finally {
 			setReopeningTicket(false);
+		}
+	};
+
+	// Start Work handlers -------------------------------------------------------
+	const handleOpenStartWorkModal = () => {
+		setStartWorkDescription("");
+		setStartWorkModalOpen(true);
+	};
+
+	const handleConfirmStartWork = async (e?: FormEvent) => {
+		if (e) e.preventDefault();
+		if (!ticket) return;
+
+		try {
+			setStartingWork(true);
+			const desc = startWorkDescription.trim();
+			if (desc) {
+				try {
+					const startMsg = `[Work Started]: ${desc}`;
+					const commentAuthorId = user?.id || "assignee";
+					const newComment = await ticketService.createComment(
+						ticket.id,
+						startMsg,
+						commentAuthorId,
+					);
+					setComments((prev) =>
+						prev.some((c) => c.id === newComment.id)
+							? prev
+							: [...prev, newComment],
+					);
+				} catch (cErr) {
+					console.warn("Could not post start work comment", cErr);
+				}
+			}
+
+			const updated = await ticketService.updateTicket(
+				ticket.id,
+				{ status: "in_progress" },
+				user?.id || "assignee",
+			);
+			setTicket(updated);
+			setStartWorkModalOpen(false);
+			setStartWorkDescription("");
+			showToast(
+				"Work started. Ticket status updated to In Progress.",
+				"success",
+			);
+			await Promise.all([reloadHistory(), reloadComments()]);
+		} catch (err) {
+			showToast(
+				err instanceof Error
+					? err.message
+					: "Failed to update status to in progress",
+				"error",
+			);
+		} finally {
+			setStartingWork(false);
+		}
+	};
+
+	// Mark as Resolved & Approval handlers ---------------------------------------
+	const handleOpenResolveModal = () => {
+		setResolveNotes("");
+		setResolveModalOpen(true);
+	};
+
+	const handleConfirmMarkResolved = async (e?: FormEvent) => {
+		if (e) e.preventDefault();
+		if (!ticket) return;
+
+		try {
+			setMarkingResolved(true);
+			const notes = resolveNotes.trim();
+			if (notes) {
+				try {
+					const resolveComment = `[Marked as Resolved]: ${notes}`;
+					const commentAuthorId = user?.id || "assignee";
+					const newComment = await ticketService.createComment(
+						ticket.id,
+						resolveComment,
+						commentAuthorId,
+					);
+					setComments((prev) =>
+						prev.some((c) => c.id === newComment.id)
+							? prev
+							: [...prev, newComment],
+					);
+				} catch (cErr) {
+					console.warn("Could not post resolution comment", cErr);
+				}
+			}
+
+			const updated = await ticketService.updateTicket(
+				ticket.id,
+				{ status: "resolved" },
+				user?.id || "assignee",
+			);
+			setTicket(updated);
+			setResolveModalOpen(false);
+			setResolveNotes("");
+			showToast(
+				"Ticket marked as resolved. Awaiting approval to close.",
+				"success",
+			);
+			await Promise.all([reloadHistory(), reloadComments()]);
+		} catch (err) {
+			showToast(
+				err instanceof Error
+					? err.message
+					: "Failed to mark ticket as resolved",
+				"error",
+			);
+		} finally {
+			setMarkingResolved(false);
+		}
+	};
+
+	const handleApproveAndCloseTicket = async () => {
+		if (!ticket) return;
+
+		try {
+			setUpdatingStatus(true);
+			const approverName =
+				user?.name ||
+				(role === "requester"
+					? "Requester"
+					: role === "supervisor"
+						? "Supervisor"
+						: "Administrator");
+			try {
+				const approvalComment = `[Resolution Approved]: Ticket approved and closed by ${approverName}.`;
+				const commentAuthorId = user?.id || "system";
+				const newComment = await ticketService.createComment(
+					ticket.id,
+					approvalComment,
+					commentAuthorId,
+				);
+				setComments((prev) =>
+					prev.some((c) => c.id === newComment.id)
+						? prev
+						: [...prev, newComment],
+				);
+			} catch (cErr) {
+				console.warn("Could not post approval comment", cErr);
+			}
+
+			const updated = await ticketService.updateTicket(
+				ticket.id,
+				{ status: "closed" },
+				user?.id || "approver",
+			);
+			setTicket(updated);
+			showToast("Ticket approved and closed successfully", "success");
+			await Promise.all([reloadHistory(), reloadComments()]);
+		} catch (err) {
+			showToast(
+				err instanceof Error
+					? err.message
+					: "Failed to approve and close ticket",
+				"error",
+			);
+		} finally {
+			setUpdatingStatus(false);
 		}
 	};
 
@@ -1122,16 +1316,38 @@ export function TicketDetailPage() {
 							{/* Requester Actions */}
 							{role === "requester" && (
 								<>
-									{ticket.status !== "closed" && (
-										<Button
-											variant="outline"
-											className="w-full text-danger"
-											isLoading={updatingStatus}
-											onClick={() => handleUpdateStatus("closed")}
-										>
-											Close Ticket (Issue Resolved)
-										</Button>
+									{ticket.status === "resolved" && (
+										<div className="resolution-approval-card mb-2">
+											<div className="resolution-card-header">
+												<CheckCircle size={16} />
+												<span>Resolution Ready for Approval</span>
+											</div>
+											<p className="resolution-card-body">
+												The technician has resolved this incident. Please verify
+												the solution and approve closing the ticket.
+											</p>
+											<Button
+												variant="primary"
+												className="w-full bg-emerald"
+												icon={<CheckCircle size={16} />}
+												isLoading={updatingStatus}
+												onClick={handleApproveAndCloseTicket}
+											>
+												Approve & Close Ticket
+											</Button>
+										</div>
 									)}
+									{ticket.status !== "closed" &&
+										ticket.status !== "resolved" && (
+											<Button
+												variant="outline"
+												className="w-full text-danger"
+												isLoading={updatingStatus}
+												onClick={() => handleUpdateStatus("closed")}
+											>
+												Close Ticket (Issue Resolved)
+											</Button>
+										)}
 									{ticket.status === "closed" &&
 										(effectivePendingReopen ? (
 											<div className="reopen-request-card">
@@ -1178,11 +1394,20 @@ export function TicketDetailPage() {
 												This incident has been resolved and closed.
 											</span>
 										</div>
-									) : (
-										<>
+									) : ticket.status === "resolved" ? (
+										<div className="resolution-approval-card">
+											<div className="resolution-card-header">
+												<CheckCircle size={16} />
+												<span>Incident Marked as Resolved</span>
+											</div>
+											<p className="resolution-card-body">
+												Awaiting approval and closure by administrator,
+												supervisor, or requester.
+											</p>
 											<Button
-												variant="primary"
-												className="w-full bg-emerald"
+												variant="outline"
+												className="w-full"
+												icon={<Paperclip size={14} />}
 												onClick={() => {
 													setAttachKind("completion_proof");
 													setAttachModalOpen(true);
@@ -1190,22 +1415,72 @@ export function TicketDetailPage() {
 											>
 												Upload Completion Proof
 											</Button>
+										</div>
+									) : ticket.status === "in_progress" ? (
+										<>
+											<div className="flex items-center gap-2 p-2.5 rounded border border-amber/30 bg-amber-subtle text-amber text-xs font-semibold">
+												<Clock size={14} />
+												<span>Work Currently In Progress</span>
+											</div>
 											<Button
-												variant="secondary"
+												variant="primary"
+												className="w-full bg-emerald"
+												icon={<CheckCircle size={16} />}
+												isLoading={markingResolved}
+												onClick={handleOpenResolveModal}
+											>
+												Mark as Resolved
+											</Button>
+											<Button
+												variant="outline"
 												className="w-full"
+												icon={<Paperclip size={14} />}
 												onClick={() => {
-													setActiveTab("conversation");
-													const commentInput = document.getElementById(
-														"ticket-reply-textarea",
-													);
-													if (commentInput) commentInput.focus();
+													setAttachKind("completion_proof");
+													setAttachModalOpen(true);
 												}}
 											>
-												Post Progress Update
+												Upload Completion Proof
 											</Button>
 											<p className="text-xs text-secondary text-center mt-1">
-												Assignees submit completion proof and chat updates for
-												supervisor sign-off.
+												Mark as resolved once physical repairs and testing are
+												completed.
+											</p>
+										</>
+									) : (
+										<>
+											<Button
+												variant="primary"
+												className="w-full"
+												icon={<Play size={16} />}
+												isLoading={startingWork}
+												onClick={handleOpenStartWorkModal}
+											>
+												Start Work
+											</Button>
+											<Button
+												variant="outline"
+												className="w-full text-emerald"
+												icon={<CheckCircle size={16} />}
+												isLoading={markingResolved}
+												onClick={handleOpenResolveModal}
+											>
+												Mark as Resolved
+											</Button>
+											<Button
+												variant="outline"
+												className="w-full"
+												icon={<Paperclip size={14} />}
+												onClick={() => {
+													setAttachKind("completion_proof");
+													setAttachModalOpen(true);
+												}}
+											>
+												Upload Completion Proof
+											</Button>
+											<p className="text-xs text-secondary text-center mt-1">
+												Start work to update ticket status to In Progress and
+												notify the team.
 											</p>
 										</>
 									)}
@@ -1215,6 +1490,28 @@ export function TicketDetailPage() {
 							{/* Supervisor & Admin Actions */}
 							{(role === "supervisor" || role === "admin") && (
 								<div className="flex flex-col gap-3">
+									{ticket.status === "resolved" && (
+										<div className="resolution-approval-card">
+											<div className="resolution-card-header">
+												<CheckCircle size={16} />
+												<span>Technician Marked as Resolved</span>
+											</div>
+											<p className="resolution-card-body">
+												The field technician has completed work and marked the
+												ticket as resolved. Review completion details and
+												approve closure.
+											</p>
+											<Button
+												variant="primary"
+												className="w-full bg-emerald"
+												icon={<CheckCircle size={16} />}
+												isLoading={updatingStatus}
+												onClick={handleApproveAndCloseTicket}
+											>
+												Approve & Close Ticket
+											</Button>
+										</div>
+									)}
 									{ticket.status === "closed" &&
 										(effectivePendingReopen ? (
 											<div className="reopen-request-card supervisor-view">
@@ -1658,6 +1955,105 @@ export function TicketDetailPage() {
 						{reopenModalMode === "request"
 							? "Supervisors and administrators will be notified to review and approve your request."
 							: "This note will be posted to the ticket conversation and recorded in history."}
+					</p>
+				</form>
+			</Modal>
+
+			{/* Mark as Resolved Modal */}
+			<Modal
+				isOpen={resolveModalOpen}
+				onClose={() => setResolveModalOpen(false)}
+				title="Mark Incident as Resolved"
+				description={`Confirm that resolution or repair for ticket #${ticket.id} has been completed. The administrator, supervisor, or requester will review and approve closing the ticket.`}
+				footer={
+					<div className="flex gap-2 justify-end w-full">
+						<Button
+							variant="secondary"
+							onClick={() => setResolveModalOpen(false)}
+							disabled={markingResolved}
+						>
+							Cancel
+						</Button>
+						<Button
+							variant="primary"
+							className="bg-emerald"
+							isLoading={markingResolved}
+							onClick={handleConfirmMarkResolved}
+						>
+							Confirm & Mark as Resolved
+						</Button>
+					</div>
+				}
+			>
+				<form
+					onSubmit={handleConfirmMarkResolved}
+					className="flex flex-col gap-3"
+				>
+					<label
+						htmlFor="resolve-notes-input"
+						className="text-xs font-semibold text-secondary"
+					>
+						Resolution Summary / Completion Notes (Optional)
+					</label>
+					<textarea
+						id="resolve-notes-input"
+						rows={4}
+						className="form-textarea w-full"
+						placeholder="Describe how the issue was fixed (e.g. replaced leaking valve, verified pressure levels, tested connectivity)..."
+						value={resolveNotes}
+						onChange={(e) => setResolveNotes(e.target.value)}
+					/>
+					<p className="text-xs text-muted">
+						This summary will be recorded in the conversation so approvers can
+						review what was done.
+					</p>
+				</form>
+			</Modal>
+
+			{/* Start Work Modal */}
+			<Modal
+				isOpen={startWorkModalOpen}
+				onClose={() => setStartWorkModalOpen(false)}
+				title="Start Work on Incident"
+				description={`Commence work on ticket #${ticket.id}. You can optionally provide an initial assessment, dispatch note, or ETA.`}
+				footer={
+					<div className="flex gap-2 justify-end w-full">
+						<Button
+							variant="secondary"
+							onClick={() => setStartWorkModalOpen(false)}
+							disabled={startingWork}
+						>
+							Cancel
+						</Button>
+						<Button
+							variant="primary"
+							icon={<Play size={15} />}
+							isLoading={startingWork}
+							onClick={handleConfirmStartWork}
+						>
+							Confirm & Start Work
+						</Button>
+					</div>
+				}
+			>
+				<form onSubmit={handleConfirmStartWork} className="flex flex-col gap-3">
+					<label
+						htmlFor="start-work-description-input"
+						className="text-xs font-semibold text-secondary"
+					>
+						Initial Assessment / Work Description (Optional)
+					</label>
+					<textarea
+						id="start-work-description-input"
+						rows={4}
+						className="form-textarea w-full"
+						placeholder="E.g. Arrived on site, diagnosed power failure, commencing troubleshooting..."
+						value={startWorkDescription}
+						onChange={(e) => setStartWorkDescription(e.target.value)}
+					/>
+					<p className="text-xs text-muted">
+						If provided, this note will be posted to the ticket conversation and
+						status will transition to In Progress.
 					</p>
 				</form>
 			</Modal>
