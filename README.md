@@ -1,12 +1,12 @@
 # Support Ticketing System (STS)
 
-A comprehensive full-stack Support Ticketing System featuring a Next.js frontend, FastAPI backend, PostgreSQL database, Garage (S3-compatible) object storage for ticket attachments, and Traefik reverse proxy.
+A comprehensive full-stack Support Ticketing System featuring a React.js frontend, FastAPI backend, PostgreSQL database, Garage (S3-compatible) object storage for ticket attachments, and Traefik reverse proxy.
 
 ---
 
 ## Architecture Overview
 
-- **Frontend**: Next.js application served on port `3000` (routed via Traefik reverse proxy).
+- **Frontend**: React.js application served on port `3000` (routed via Traefik reverse proxy).
 - **Backend API**: Python FastAPI service exposing RESTful APIs under `/api` on port `8000`.
 - **Database**: PostgreSQL 17 for relational storage.
 - **Attachment Storage**: Garage S3-compatible distributed object storage.
@@ -128,4 +128,141 @@ docker compose down -v
 
 
 ## Kubernetes Deployment
-[TODO: Add guide for deploying the application on Kubernetes cluster]
+
+The application supports automated GitOps deployment on Kubernetes using Argo CD, Argo CD Image Updater, and Traefik Ingress Controller. You can run on **K3s** (recommended for production servers / VMs) or **Kind** (Kubernetes in Docker for local development and testing).
+
+---
+
+### 1. Prerequisites & Dependencies
+
+Install host-level dependencies (`kubectl`, `helm`, `kind`/`k3s`, `docker`, `argocd`, `jq`, `curl`, `git`, `openssl`). A helper script is provided for Ubuntu 24.04 LTS, Arch Linux, and NixOS:
+
+```bash
+bash install-deps.sh
+```
+
+Ensure your `.env` configuration file is present in the repository root (see [Configure Environment Variables](#2-configure-environment-variables)):
+
+```bash
+cp .env.example .env
+```
+
+> [!NOTE]
+> If specific credentials are not defined in `.env`, the deployment script will automatically generate cryptographically secure values and persist them safely inside the Kubernetes Secret `sts-secrets` in the cluster.
+
+---
+
+### 2. Start the Kubernetes Cluster
+
+Use `init-cluster.sh` to initialize your chosen cluster environment:
+
+#### Option A: Production K3s Cluster (Recommended for Servers & VMs)
+
+Installs a lightweight CNCF-certified Kubernetes distribution managed as a systemd service, configured with default `local-path` persistent storage and Traefik Ingress:
+
+```bash
+# Optional: specify public IP or hostname for TLS SANs if deploying to a remote host
+# export K3S_TLS_SANS="<your-server-ip>"
+
+./init-cluster.sh --k3s
+```
+
+#### Option B: Local Kind Cluster (Development & Testing)
+
+Spins up a local cluster inside Docker with host port mappings (`80`/`443`) and local volume persistence under `.sts-kind-data`:
+
+```bash
+./init-cluster.sh --kind
+```
+
+> [!TIP]
+> Running `./init-cluster.sh` without arguments launches an interactive prompt allowing you to pick between K3s and Kind.
+
+---
+
+### 3. Deploy & Run the Application Stack
+
+Once the cluster is running, run `deploy.sh` to configure cluster secrets, deploy Argo CD, set up Argo CD Image Updater, and trigger GitOps synchronization:
+
+#### Deploy to K3s / Existing Cluster
+
+```bash
+./deploy.sh --wait
+```
+
+#### Deploy to Local Kind Cluster
+
+```bash
+./deploy.sh --wait --kind
+```
+
+#### What `deploy.sh` Automates:
+1. **Secret Provisioning**: Creates the `sts-prod` namespace and generates/synchronizes the `sts-secrets` Secret from `.env`.
+2. **Ingress & Storage Setup**: Validates the `traefik` IngressClass and `local-path` StorageClass.
+3. **Argo CD Deployment**: Installs Argo CD and applies `argocd/application.yaml` to track and sync manifests from git.
+4. **Automated Image Updates**: Deploys Argo CD Image Updater (`argocd/image-updater.yaml`) to continuously poll GHCR and auto-deploy new container releases.
+5. **Monitoring (Optional)**: Automatically installs `kube-prometheus-stack` with Prometheus and Grafana (can be disabled with `--no-monitoring`).
+
+---
+
+### 4. Verify Workloads & Access Endpoints
+
+#### Check Workload Status
+
+```bash
+# Inspect all running pods, services, and ingresses in sts-prod
+kubectl -n sts-prod get pods,svc,ingress,pvc
+
+# Check Argo CD synchronization status
+kubectl -n argocd get applications
+```
+
+#### Accessing Services
+
+| Service / Interface | URL / Access Method | Credentials |
+| :--- | :--- | :--- |
+| **Support Desk Web App** | [http://localhost/](http://localhost/) (or node IP) | Email: `admin@example.com`<br>Password: configured in `.env` |
+| **Backend REST API** | [http://localhost/api/v1](http://localhost/api/v1) | — |
+| **Argo CD Dashboard** | Port-forward:<br>`kubectl -n argocd port-forward svc/argocd-server 8080:443`<br>Then open [https://localhost:8080](https://localhost:8080) | Username: `admin`<br>Password: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" \| base64 -d` |
+| **Grafana Dashboard** | Port-forward:<br>`kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3001:80`<br>Then open [http://localhost:3001](http://localhost:3001) | Username: `admin`<br>Password: `prom-operator` |
+
+---
+
+### 5. Stop & Delete the Kubernetes Cluster
+
+#### For Production K3s:
+
+**To temporarily stop all pods and cluster processes:**
+```bash
+sudo systemctl stop k3s
+sudo /usr/local/bin/k3s-killall.sh
+```
+
+**To restart K3s after stopping:**
+```bash
+sudo systemctl start k3s
+```
+
+**To completely delete and uninstall K3s (removes cluster, containers, and data):**
+```bash
+sudo systemctl stop k3s
+sudo /usr/local/bin/k3s-uninstall.sh
+```
+
+#### For Local Kind:
+
+**To delete the Kind cluster:**
+```bash
+kind delete cluster --name sts-prod
+```
+
+**To clean up local persistent storage data:**
+```bash
+rm -rf .sts-kind-data
+```
+
+#### To Delete Only Application Workloads (keep the cluster intact):
+```bash
+kubectl delete -f argocd/application.yaml
+kubectl delete namespace sts-prod
+```
