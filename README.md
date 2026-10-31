@@ -100,10 +100,6 @@ Once started, the following services and interfaces are accessible:
 | Service / Interface | URL | Description |
 | :--- | :--- | :--- |
 | **Web Application** | [http://localhost](http://localhost) | Main frontend interface |
-| **API Documentation** | [http://localhost/api/docs](http://localhost/api/docs) | Interactive Swagger UI docs |
-| **API Alternative Docs** | [http://localhost/api/redoc](http://localhost/api/redoc) | ReDoc API specification |
-| **API Direct Port** | [http://localhost:8000/api](http://localhost:8000/api) | Direct access to FastAPI backend |
-| **PostgreSQL Database** | `localhost:5433` | Database port exposed to host |
 | **Traefik Dashboard** | [http://localhost:8080/dashboard/](http://localhost:8080/dashboard/) | Traefik reverse proxy dashboard |
 
 ---
