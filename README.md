@@ -129,7 +129,7 @@ docker compose down -v
 
 ## Kubernetes Deployment
 
-The application supports automated GitOps deployment on Kubernetes using Argo CD, Argo CD Image Updater, and Traefik Ingress Controller. You can run on **K3s** (recommended for production servers / VMs) or **Kind** (Kubernetes in Docker for local development and testing).
+The application supports automated GitOps deployment on Kubernetes using Argo CD, Argo CD Image Updater, and Ingress via Traefik. You can run on **K3s** (recommended for production servers / VMs) or **Kind** (Kubernetes in Docker for local development and testing).
 
 ---
 
@@ -138,7 +138,7 @@ The application supports automated GitOps deployment on Kubernetes using Argo CD
 Install host-level dependencies (`kubectl`, `helm`, `kind`/`k3s`, `docker`, `argocd`, `jq`, `curl`, `git`, `openssl`). A helper script is provided for Ubuntu 24.04 LTS, Arch Linux, and NixOS:
 
 ```bash
-bash install-deps.sh
+./deploy/install-deps.sh
 ```
 
 Ensure your `.env` configuration file is present in the repository root (see [Configure Environment Variables](#2-configure-environment-variables)):
@@ -164,7 +164,7 @@ Installs a lightweight CNCF-certified Kubernetes distribution managed as a syste
 # Optional: specify public IP or hostname for TLS SANs if deploying to a remote host
 # export K3S_TLS_SANS="<your-server-ip>"
 
-./init-cluster.sh --k3s
+./deploy/init-cluster.sh --k3s
 ```
 
 #### Option B: Local Kind Cluster (Development & Testing)
@@ -172,11 +172,11 @@ Installs a lightweight CNCF-certified Kubernetes distribution managed as a syste
 Spins up a local cluster inside Docker with host port mappings (`80`/`443`) and local volume persistence under `.sts-kind-data`:
 
 ```bash
-./init-cluster.sh --kind
+./deploy/init-cluster.sh --kind
 ```
 
 > [!TIP]
-> Running `./init-cluster.sh` without arguments launches an interactive prompt allowing you to pick between K3s and Kind.
+> Running `init-cluster.sh` without arguments launches an interactive prompt allowing you to pick between K3s and Kind.
 
 ---
 
@@ -187,13 +187,13 @@ Once the cluster is running, run `deploy.sh` to configure cluster secrets, deplo
 #### Deploy to K3s / Existing Cluster
 
 ```bash
-./deploy.sh --wait
+./deploy/deploy.sh --wait
 ```
 
 #### Deploy to Local Kind Cluster
 
 ```bash
-./deploy.sh --wait --kind
+./deploy/deploy.sh --wait --kind
 ```
 
 #### What `deploy.sh` Automates:
