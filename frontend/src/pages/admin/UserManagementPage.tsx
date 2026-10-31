@@ -91,8 +91,8 @@ export function UserManagementPage() {
 	// Handle Create User
 	const handleCreateUser = async (e: FormEvent) => {
 		e.preventDefault();
-		if (!newName.trim() || !newEmail.trim()) {
-			showToast("Name and email are required", "error");
+		if (!newName.trim() || !newEmail.trim() || !newPhone.trim()) {
+			showToast("Name, email, and phone number are required", "error");
 			return;
 		}
 		if (newPassword.length < 12) {
@@ -115,7 +115,7 @@ export function UserManagementPage() {
 				created = await ticketService.createAdminUser({
 					name: newName.trim(),
 					email: newEmail.trim(),
-					phone: newPhone.trim() || "+1-555-0100",
+					phone: newPhone.trim(),
 					password: newPassword,
 				});
 			} else {
@@ -123,7 +123,7 @@ export function UserManagementPage() {
 				created = await ticketService.registerPerson({
 					name: newName.trim(),
 					email: newEmail.trim(),
-					phone: newPhone.trim() || "+1-555-0100",
+					phone: newPhone.trim(),
 					password: newPassword,
 				});
 
@@ -419,6 +419,7 @@ export function UserManagementPage() {
 						placeholder="+1 (555) 234-5678"
 						value={newPhone}
 						onChange={(e) => setNewPhone(e.target.value)}
+						required
 					/>
 
 					{/* Explicit Password Field as requested */}

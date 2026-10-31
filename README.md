@@ -31,13 +31,13 @@ Follow these steps to launch the entire stack locally:
 ### 1. Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/r-ethan18/Support-Ticketing-System.git
 cd Support-Ticketing-System
 ```
 
 ### 2. Configure Environment Variables
 
-Create your local `.env` configuration file from [.env.example](file:///.env.example):
+Create your local `.env` configuration file from `.env.example`:
 
 ```bash
 cp .env.example .env
