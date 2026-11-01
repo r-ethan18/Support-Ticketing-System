@@ -16,10 +16,12 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: sts-ingress
+
 spec:
   ingressClassName: traefik
   rules:
-    - http:
+    - host: devops.tarunjeeth.dev
+      http:
         paths:
           - path: /api
             pathType: Prefix
